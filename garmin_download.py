@@ -166,11 +166,11 @@ for date in tqdm(date_list):
 
         sleep_list.append({
             "date": date.isoformat(),
-            "total_sleep_hr": round(s.get("sleepTimeSeconds", 0) / 3600, 2),
-            "deep_sleep_hr": round(s.get("deepSleepSeconds", 0) / 3600, 2),
-            "light_sleep_hr": round(s.get("lightSleepSeconds", 0) / 3600, 2),
-            "rem_sleep_hr": round(s.get("remSleepSeconds", 0) / 3600, 2),
-            "awake_sleep_hr": round(s.get("awakeSleepSeconds", 0) / 3600, 2),
+            "total_sleep_hr": round(s.get("sleepTimeSeconds", 0) / 3600, 2) if s.get("sleepTimeSeconds") else np.nan,
+            "deep_sleep_hr": round(s.get("deepSleepSeconds", 0) / 3600, 2) if s.get("deepSleepSeconds") else np.nan,
+            "light_sleep_hr": round(s.get("lightSleepSeconds", 0) / 3600, 2) if s.get("lightSleepSeconds") else np.nan,
+            "rem_sleep_hr": round(s.get("remSleepSeconds", 0) / 3600, 2) if s.get("remSleepSeconds") else np.nan,
+            "awake_sleep_hr": round(s.get("awakeSleepSeconds", 0) / 3600, 2) if s.get("awakeSleepSeconds") else np.nan,
             "avg_sleep_hr": s.get("avgHeartRate"),
             "avg_sleep_respiration": s.get("averageRespirationValue"),
             "avg_sleep_stress": s.get("avgSleepStress"),
