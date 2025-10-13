@@ -23,7 +23,7 @@ This project allows you to download, merge, and analyze Garmin data including **
 2. **Install required packages**:
 
 ```bash
-pip install garminconnect tqdm pandas matplotlib seaborn
+pip install garminconnect tqdm pandas matplotlib seaborn numpy
 ```
 
 3. **(Optional)** Install Garmin Exporter CLI if you want an alternative command-line approach. This allows to only export activities, not health data.

@@ -1,5 +1,7 @@
 figs/
 data/
+analysis_results/
+temp/
 .venv/
 .json
 *.env

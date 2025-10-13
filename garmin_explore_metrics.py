@@ -1,71 +1,100 @@
 from garminconnect import Garmin
-import json, os, csv
-from datetime import date, timedelta, datetime
-from tqdm import tqdm  # Progress bar library
-import pandas as pd
+import json, os
+from datetime import date, timedelta
+from tqdm import tqdm
 
-def print_nested_keys(d, indent=0):
-    """Recursively print all keys in a nested dictionary or list"""
-    if isinstance(d, dict):
-        for k, v in d.items():
-            print("  " * indent + f"📂 {k}")
-            print_nested_keys(v, indent + 1)
-    elif isinstance(d, list) and d:
-        print("  " * indent + f"[list of {len(d)}]")
-        print_nested_keys(d[0], indent + 1)
+# ---------- CONFIG ----------
 
-def save_raw_api_data(api_func, args, prefix, output_dir):
-    """Fetch data from an API function, save raw JSON, and optionally print nested keys."""
-    try:
-        data = api_func(*args)
+EMAIL = input("Email Garmin: ")
+PASSWORD = input("Password: ")
+
+OUTPUT_DIR = "./data/garmin_keys_explore"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+TEXT_FILE = os.path.join(OUTPUT_DIR, "garmin_keys_summary.txt")
+JSON_FILE = os.path.join(OUTPUT_DIR, "garmin_keys_summary.json")
+
+today = date.today()
+start_date = today - timedelta(days=30)
+
+# ---------- FUNCTIONS ----------
+
+def extract_structure(data):
+    """Return a nested structure of keys without values."""
+    if isinstance(data, dict):
+        return {k: extract_structure(v) for k, v in data.items()}
+    elif isinstance(data, list):
         if not data:
-            print(f"⚠️ No data for {prefix}")
-            return None
+            return ["<empty list>"]
+        return [extract_structure(data[0])]
+    else:
+        return "<value>"
 
-        # Save to file
-        raw_file = os.path.join(output_dir, f"raw_{prefix}.json")
-        with open(raw_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
 
-        print(f"💾 Saved raw {prefix} data → {raw_file}")
-        return data
+def format_structure_text(data, indent=0):
+    """Convert nested structure to indented text with 📂 icons."""
+    lines = []
+    if isinstance(data, dict):
+        for k, v in data.items():
+            lines.append("  " * indent + f"📂 {k}")
+            lines.extend(format_structure_text(v, indent + 1))
+    elif isinstance(data, list):
+        lines.append("  " * indent + f"[list]")
+        if data and isinstance(data[0], (dict, list)):
+            lines.extend(format_structure_text(data[0], indent + 1))
+    return lines
+
+
+def explore_endpoint(api, func_name, args, prefix):
+    """Fetch data from Garmin API and return key structure in both text and dict formats."""
+    try:
+        func = getattr(api, func_name)
+        data = func(*args)
+        if not data:
+            return f"⚠️ No data for {prefix}\n", None
+
+        structure = extract_structure(data)
+        text = f"\n🔹 {prefix.upper()} ({func_name})\n" + "\n".join(format_structure_text(structure)) + "\n"
+        return text, structure
 
     except Exception as e:
-        print(f"❌ Error fetching {prefix}: {e}")
-        return None
+        return f"❌ Error fetching {prefix}: {e}\n", None
 
-# 👉 Your Garmin login
-EMAIL = input("your_email@example.com: ")
-PASSWORD = input("your_password: ")
 
-# ---- LOGIN ----
+# ---------- LOGIN ----------
+
 print("🔐 Logging in to Garmin Connect...")
 api = Garmin(EMAIL, PASSWORD)
 api.login()
 
+# ---------- METRICS TO EXPLORE ----------
 
-# ---- OUTPUT DIRECTORY ----
-OUTPUT_DIR = f"./data/garmin_data_explore"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-print(f"\n📂 Data will be saved in: {OUTPUT_DIR}\n")
-
-# Pick a single date to explore
-today = date.today()
-start_date = today - timedelta(days=30)
-
-# ---- Metrics to explore ----
 metrics = {
     "hrv": ("get_hrv_data", [today.isoformat()]),
     "rhr": ("get_rhr_day", [today.isoformat()]),
     "sleep": ("get_sleep_data", [today.isoformat()]),
-    "menstrual_calendar": ("get_menstrual_calendar_data", [start_date.isoformat(), today.isoformat()])
+    "stress": ("get_stress_data", [today.isoformat()]),
+    "body_battery": ("get_body_battery", [today.isoformat()]),
+    "training_readiness": ("get_training_readiness", [today.isoformat()]),
+    "training_status": ("get_training_status", [today.isoformat()]),
+    "menstrual_calendar": ("get_menstrual_calendar_data", [start_date.isoformat(), today.isoformat()]),
 }
 
-for name, (func_name, args) in metrics.items():
-    print(f"\n🔍 Fetching {name} data...")
-    func = getattr(api, func_name)  # dynamically get the function
-    data = save_raw_api_data(func, args, name, OUTPUT_DIR)
+# ---------- RUN EXPLORATION ----------
 
-    if data:
-        print(f"\n🧭 Keys inside {name}:")
-        print_nested_keys(data)
+results_json = {}
+
+with open(TEXT_FILE, "w", encoding="utf-8") as f:
+    for name, (func_name, args) in tqdm(metrics.items(), desc="Exploring Garmin API"):
+        print(f"\n🔍 Exploring {name}...")
+        text, structure = explore_endpoint(api, func_name, args, name)
+        print(text)
+        f.write(text + "\n")
+        if structure:
+            results_json[name] = structure
+
+# Save JSON version
+with open(JSON_FILE, "w", encoding="utf-8") as f:
+    json.dump(results_json, f, indent=2, ensure_ascii=False)
+
+print(f"\n✅ Saved key structures to:\n - {TEXT_FILE}\n - {JSON_FILE}")

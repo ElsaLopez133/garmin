@@ -3,6 +3,8 @@ import json, os, csv
 from datetime import date, timedelta, datetime
 from tqdm import tqdm  # Progress bar library
 import pandas as pd
+import getpass
+import numpy as np
 
 def print_nested_keys(d, indent=0):
     """Recursively print all keys in a nested dictionary or list"""
@@ -32,8 +34,8 @@ def fetch_menstrual_calendar(api, start_date, end_date):
 
 # To run directly: "C:\Users\elsal\AppData\Roaming\Python\Python312\Scripts\garmin-backup.exe" elsa.lopez.133@outlook.es --password  'xxxxxxxxx' --backup-dir .\garmin_data
 # 👉 Your Garmin login
-EMAIL = input("your_email@example.com: ")
-PASSWORD = input("your_password: ")
+EMAIL = input("Email: ")
+PASSWORD = getpass.getpass("Password: ")
 
 # ---- LOGIN ----
 print("🔐 Logging in to Garmin Connect...")
@@ -61,7 +63,7 @@ start_date = today - timedelta(days=DAYS_BACK)
 date_list = [start_date + timedelta(days=i) for i in range(DAYS_BACK + 1)]
 
 # ---- Initialize lists ----
-hrv_list, rhr_list, sleep_list, cycle_list = [], [], [], []
+hrv_list, rhr_list, sleep_list, cycle_list, stress_list, body_battery_list, training_load_list, training_status_list  = [], [], [], [], [], [], [], []
 
 # ---- HRV ----
 print("\n📈 Downloading HRV data...")
@@ -244,6 +246,159 @@ for date in tqdm(date_list):
     phase = calendar_days.get(date.isoformat(), "Not logged")
     cycle_list.append({"date": date.isoformat(), "cycle_phase": phase})
 
+# ---- Stress ----
+print("\n💢 Downloading Stress data...")
+
+for date in tqdm(date_list):
+    try:
+        data = api.get_stress_data(date.isoformat())
+        if data:
+            stress_list.append({
+                "date": date.isoformat(),
+                "maxStressLevel": data.get("maxStressLevel"),
+                "avgStressLevel": data.get("avgStressLevel"),
+            })
+        else:
+            stress_list.append({
+                "date": date.isoformat(),
+                "maxStressLevel": None,
+                "avgStressLevel": None
+            })
+    except Exception as e:
+        print(f"Error fetching stress for {date}: {e}")
+        stress_list.append({
+            "date": date.isoformat(),
+            "maxStressLevel": None,
+            "avgStressLevel": None
+        })
+
+# ---- Body Battery ----
+print("\n🔋 Downloading Body Battery data...")
+
+for date in tqdm(date_list):
+    try:
+        data = api.get_body_battery(date.isoformat())
+        if data and isinstance(data, list) and data[0]:
+            bb = data[0]
+            body_battery_list.append({
+                "date": date.isoformat(),
+                "charged": bb.get("charged"),
+                "drained": bb.get("drained"),
+                #"avg_battery": np.mean([v for sub in bb.get("bodyBatteryValuesArray", []) for v in sub]) if bb.get("bodyBatteryValuesArray") else None
+            })
+        else:
+            body_battery_list.append({"date": date.isoformat(), "charged": None, "drained": None})
+    
+    except Exception as e:
+        print(f"Error fetching body battery for {date}: {e}")
+        body_battery_list.append({"date": date.isoformat(), "charged": None, "drained": None})
+
+
+# ---- Training Readiness / Effect ----
+print("\n💪 Downloading Training Status data...")
+
+for date in tqdm(date_list):
+    try:
+        data = api.get_training_status(date.isoformat())
+        if data and "mostRecentTrainingLoadBalance" in data:
+            load_map = data["mostRecentTrainingLoadBalance"].get("metricsTrainingLoadBalanceDTOMap", {})
+            if load_map:
+                # Get the first (and usually only) entry
+                b = next(iter(load_map.values()))
+                training_load_list.append({
+                "date": date.isoformat(),
+                "monthlyLoadAerobicLow": b.get("monthlyLoadAerobicLow"),
+                "monthlyLoadAerobicHigh": b.get("monthlyLoadAerobicHigh"),
+                "monthlyLoadAnaerobic": b.get("monthlyLoadAnaerobic"),
+                "monthlyLoadAerobicLowTargetMin": b.get("monthlyLoadAerobicLowTargetMin"),
+                "monthlyLoadAerobicLowTargetMax": b.get("monthlyLoadAerobicLowTargetMax"),
+                "monthlyLoadAerobicHighTargetMin": b.get("monthlyLoadAerobicHighTargetMin"),
+                "monthlyLoadAerobicHighTargetMax": b.get("monthlyLoadAerobicHighTargetMax"),
+                "monthlyLoadAnaerobicTargetMin": b.get("monthlyLoadAnaerobicTargetMin"),
+                "monthlyLoadAnaerobicTargetMax": b.get("monthlyLoadAnaerobicTargetMax"),
+                "trainingBalanceFeedbackPhrase": b.get("trainingBalanceFeedbackPhrase")
+                })
+            else:
+                training_load_list.append({
+                "date": date.isoformat(),
+                "monthlyLoadAerobicLow": None,
+                "monthlyLoadAerobicHigh": None,
+                "monthlyLoadAnaerobic": None,
+                "monthlyLoadAerobicLowTargetMin": None,
+                "monthlyLoadAerobicLowTargetMax": None,
+                "monthlyLoadAerobicHighTargetMin": None,
+                "monthlyLoadAerobicHighTargetMax": None,
+                "monthlyLoadAnaerobicTargetMin": None,
+                "monthlyLoadAnaerobicTargetMax": None,
+                "trainingBalanceFeedbackPhrase": None,
+                })
+                
+        if data and "mostRecentTrainingStatus" in data:
+            latest = data["mostRecentTrainingStatus"].get("latestTrainingStatusData", {})
+            if latest:
+                # Get the first (and usually only) entry
+                last_entry = next(iter(latest.values()))
+                training_status_list.append({
+                "date": date.isoformat(),
+                "trainingStatus": last_entry.get("trainingStatus"),
+                "weeklyTrainingLoad": last_entry.get("weeklyTrainingLoad"),
+                "feedback": last_entry.get("trainingStatusFeedbackPhrase"),
+                "dailyTrainingLoadAcute": last_entry.get("acuteTrainingLoadDTO", {}).get("dailyTrainingLoadAcute"),
+                "acwrPercent": last_entry.get("acuteTrainingLoadDTO", {}).get("acwrPercent"),
+                "acwrStatus": last_entry.get("acuteTrainingLoadDTO", {}).get("acwrStatus"),
+                "acwrStatusFeedback": last_entry.get("acuteTrainingLoadDTO", {}).get("acwrStatusFeedback"),
+                "dailyTrainingLoadChronic": last_entry.get("acuteTrainingLoadDTO", {}).get("dailyTrainingLoadChronic"),
+                "minTrainingLoadChronic": last_entry.get("acuteTrainingLoadDTO", {}).get("minTrainingLoadChronic"),
+                "maxTrainingLoadChronic": last_entry.get("acuteTrainingLoadDTO", {}).get("maxTrainingLoadChronic"),
+                "dailyAcuteChronicWorkloadRatio": last_entry.get("acuteTrainingLoadDTO", {}).get("dailyAcuteChronicWorkloadRatio")
+                })
+            else:
+                training_status_list.append({
+                "date": date.isoformat(),
+                "trainingStatus": None,
+                "weeklyTrainingLoad": None,
+                "feedback": None,
+                "dailyTrainingLoadAcute": None,
+                "acwrPercent": None,
+                "acwrStatus": None,
+                "acwrStatusFeedback": None,
+                "dailyTrainingLoadChronic": None,
+                "minTrainingLoadChronic": None,
+                "maxTrainingLoadChronic": None,
+                "dailyAcuteChronicWorkloadRatio": None
+                })
+                
+    except Exception as e:
+        print(f"Error fetching training data for {date}: {e}")
+        training_load_list.append({
+        "date": date.isoformat(),
+        "monthlyLoadAerobicLow": None,
+        "monthlyLoadAerobicHigh": None,
+        "monthlyLoadAnaerobic": None,
+        "monthlyLoadAerobicLowTargetMin": None,
+        "monthlyLoadAerobicLowTargetMax": None,
+        "monthlyLoadAerobicHighTargetMin": None,
+        "monthlyLoadAerobicHighTargetMax": None,
+        "monthlyLoadAnaerobicTargetMin": None,
+        "monthlyLoadAnaerobicTargetMax": None,
+        "trainingBalanceFeedbackPhrase": None,
+        })
+        training_status_list.append({
+        "date": date.isoformat(),
+        "trainingStatus": None,
+        "weeklyTrainingLoad": None,
+        "feedback": None,
+        "dailyTrainingLoadAcute": None,
+        "acwrPercent": None,
+        "acwrStatus": None,
+        "acwrStatusFeedback": None,
+        "dailyTrainingLoadChronic": None,
+        "minTrainingLoadChronic": None,
+        "maxTrainingLoadChronic": None,
+        "dailyAcuteChronicWorkloadRatio": None
+        })
+        continue
+
 
 # ---- SAVE JSON ----
 print("\n💾 Saving JSON files...")
@@ -259,27 +414,41 @@ with open(f"{OUTPUT_DIR}/sleep_data.json", "w") as f:
 with open(f"{OUTPUT_DIR}/cycle_data.json", "w") as f:
     json.dump(cycle_list, f, indent=2)
 
+with open(f"{OUTPUT_DIR}/body_battery_data.json", "w") as f:
+    json.dump(body_battery_list, f, indent=2)
+
+with open(f"{OUTPUT_DIR}/stress_data.json", "w") as f:
+    json.dump(stress_list, f, indent=2)
+
+with open(f"{OUTPUT_DIR}/training_load_data.json", "w") as f:
+    json.dump(training_load_list, f, indent=2)
+    
+with open(f"{OUTPUT_DIR}/training_status_data.json", "w") as f:
+    json.dump(training_status_list, f, indent=2)
+    
 # ---- MERGE DATA ----
 print("\n📊 Merging data into CSV...")
 
 # --- Convert lists to DataFrames ---
-df_hrv = pd.DataFrame(hrv_list)
-df_rhr = pd.DataFrame(rhr_list)
-df_sleep = pd.DataFrame(sleep_list)
-df_cycle = pd.DataFrame(cycle_list)
+dfs = {
+    "hrv": pd.DataFrame(hrv_list),
+    "rhr": pd.DataFrame(rhr_list),
+    "sleep": pd.DataFrame(sleep_list),
+    "cycle": pd.DataFrame(cycle_list),
+    "stress": pd.DataFrame(stress_list),
+    "body_battery": pd.DataFrame(body_battery_list),
+    "training_load": pd.DataFrame(training_load_list),
+    "training_status": pd.DataFrame(training_status_list)
+}
 
 # --- Ensure all DataFrames have 'date' as datetime index ---
-for df in [df_hrv, df_rhr, df_sleep, df_cycle]:
+# Standardize date index
+for df in dfs.values():
     if "date" in df.columns:
         df["date"] = pd.to_datetime(df["date"])
         df.set_index("date", inplace=True)
 
-# --- Merge all with outer join (keeps all dates even if some data missing) ---
-df_all = (
-    pd.concat([df_hrv, df_rhr, df_sleep, df_cycle], axis=1)
-    .sort_index()
-    .reset_index()
-)
+df_all = pd.concat(dfs.values(), axis=1).sort_index().reset_index()
 
 # --- Flatten nested dict columns like 'baseline' ---
 def flatten_dict_column(df, column_name, prefix):
@@ -296,10 +465,7 @@ def flatten_dict_column(df, column_name, prefix):
 
 df_all = flatten_dict_column(df_all, "baseline", "baseline")
 
-# --- Save clean CSV ---
-FILE_NAME = f"garmin_data_{DAYS_BACK}days"
-csv_path = f"{OUTPUT_DIR}/{FILE_NAME}.csv"
-df_all.to_csv(csv_path, index=False)
+df_all.to_csv(f"{OUTPUT_DIR}/garmin_data_{DAYS_BACK}days.csv", index=False)
+print(f"\n✅ Done! Saved to {OUTPUT_DIR}/garmin_data_{DAYS_BACK}days.csv")
 
-print(f"\n✅ Done! Data saved to {csv_path}")
-print(f"💡 Tip: Load it later with pandas using parse_dates=['date'] for plotting.")
+

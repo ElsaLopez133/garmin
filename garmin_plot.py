@@ -2,6 +2,8 @@ import pandas as pd
 import os
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from matplotlib.patches import Patch
+
 
 # Load your data
 while True:
@@ -40,7 +42,7 @@ plt.fill_between(df["date"],
                  color="skyblue", alpha=0.3, label="Baseline range")
 
 # Weekly average (line)
-plt.plot(df["date"], df["weekly_avg"], label="Weekly Avg", color="blue", linewidth=2)
+plt.plot(df["date"], df["weekly_avg"], label="Weekly Avg", color="blue", markersize=3, linewidth=2, alpha=0.9)
 
 # Night HRV (dots)
 plt.scatter(df["date"], df["hrv_rmssd"], label="Last night HRV", color="black")
@@ -82,30 +84,40 @@ ax1.fill_between(df["date"],
 
 # --- Daily HRV rMSSD (small markers, thin line) ---
 plt.plot(df["date"], df["hrv_rmssd"], 
-         color="black", marker="o", markersize=4, linewidth=2, alpha=0.9, label="Daily HRV rMSSD")
+         color="black", marker="o", markersize=2, linewidth=2, alpha=0.9, label="Daily HRV rMSSD")
 # --- Weekly average HRV (larger markers, thicker line) ---
 plt.plot(df["date"], df["weekly_avg"], 
-         color="blue", marker="x", markersize=2, linewidth=1, alpha=0.7, label="Weekly Avg HRV")
+         color="blue", marker="x", markersize=1, linewidth=1, alpha=0.7, label="Weekly Avg HRV")
 
 ax1.set_ylabel("HRV (rMSSD)")
 ax1.grid(alpha=0.3)
 
 # Secondary y-axis for RHR
 ax2 = ax1.twinx()
-ax2.plot(df["date"], df["resting_hr"], color="red", marker="o", markersize=4, linewidth=2, alpha=0.9, label="RHR")
+ax2.plot(df["date"], df["resting_hr"], color="red", marker="o", markersize=2, linewidth=2, alpha=0.9, label="RHR")
 ax2.set_ylabel("Resting Heart Rate (bpm)")
 
 # Combine legends
 lines_labels = [ax.get_legend_handles_labels() for ax in [ax1, ax2]]
 lines, labels = [sum(lol, []) for lol in zip(*lines_labels)]
-ax1.legend(lines, labels, loc="upper left")
 
+# Remove duplicates while preserving order
+seen = set()
+unique_lines = []
+unique_labels = []
+for l, lab in zip(lines, labels):
+    if lab not in seen:
+        unique_lines.append(l)
+        unique_labels.append(lab)
+        seen.add(lab)
+
+ax1.legend(unique_lines, unique_labels, loc="upper left")
 plt.tight_layout()
 plt.savefig(f"{OUTPUT_DIR}/hrv_rhr_plot.jpg")
 
 
 
-plt.plot(df["date"], df["resting_hr"], color="red", marker="o", label="RHR")
+plt.plot(df["date"], df["resting_hr"], color="red", marker="o", markersize=3, linewidth=2, alpha=0.9,  label="RHR")
 plt.ylabel("BPM")
 plt.legend()
 plt.grid(alpha=0.3)
@@ -140,7 +152,7 @@ awake = plt.bar(df["date"], df["awake_sleep_hr"],
 # Optional: sleep score line
 ax2 = plt.gca().twinx()
 ax2.set_ylabel("Sleep Score")
-ax2.plot(df["date"], df["sleep_score"], color="black", marker="o", markersize=4, linewidth=1, alpha=0.7,)
+ax2.plot(df["date"], df["sleep_score"], color="black", marker="o", markersize=3, linewidth=1, alpha=0.7,)
 
 # Custom legend for sleep stages only
 plt.legend([light, deep, rem, awake], colors.keys(), title="Sleep Stage", loc="upper right")
@@ -181,13 +193,13 @@ plt.fill_between(df["date"],
 # ---- HRV night ----
 # --- Daily HRV rMSSD (small markers, thin line) ---
 plt.plot(df["date"], df["hrv_rmssd"], 
-         color="black", marker="x", markersize=4, linewidth=1, alpha=0.7, label="Daily HRV rMSSD")
+         color="black", marker="x", markersize=2, linewidth=1, alpha=0.7, label="Daily HRV rMSSD")
 # --- Weekly average HRV (larger markers, thicker line) ---
 plt.plot(df["date"], df["weekly_avg"], 
-         color="blue", marker="o", markersize=7, linewidth=3, alpha=0.9, label="Weekly Avg HRV")
+         color="blue", marker="o", markersize=3, linewidth=2, alpha=0.9, label="Weekly Avg HRV")
 
 # ---- RHR ----
-plt.plot(df["date"], df["resting_hr"], color="red", marker="o", label="RHR")
+plt.plot(df["date"], df["resting_hr"], color="red", marker="o", markersize=3, linewidth=2, alpha=0.9, label="RHR")
 
 # ---- Legend for phases ----
 phase_patches = [mpatches.Patch(color=c, label=p) for p, c in phase_colors.items()]
@@ -198,7 +210,66 @@ plt.ylabel("HRV (ms) / RHR (BPM)")
 plt.grid(alpha=0.3)
 plt.tight_layout()
 plt.savefig(f"{OUTPUT_DIR}/combined_plot.png")
-plt.show()
+#plt.show()
+
+ #---- Training load ----
+print("\n📈 Plotting training load data...")
+
+plt.figure(figsize=(12,6))
+plt.title("Training Load: Acute vs Chronic with Phases")
+
+# Define base colors
+base_colors = {
+    "MAINTAINING": "yellow",
+    "UNPRODUCTIVE": "red",
+    "PRODUCTIVE": "green",
+    "RECOVERY": "blue",
+    "PEAKING": "purple",
+    "STRAINED": "orange"
+}
+
+# Custom legend for phases
+phase_patches = [Patch(color=color, label=phase) for phase, color in base_colors.items()]
+df["feedback"] = df["feedback"].str.split("_").str[0]
+df["color"] = df["feedback"].map(base_colors)
+# Fill any missing colors with a default
+df["color"] = df["color"].fillna("gray")  # fallback color
+
+
+# Plot shaded baseline per segment
+for i in range(len(df)-1):
+    plt.fill_between(
+        df["date"].iloc[i:i+2],
+        df["minTrainingLoadChronic"].iloc[i:i+2],
+        df["maxTrainingLoadChronic"].iloc[i:i+2],
+        color=df["color"].iloc[i],
+        alpha=0.3
+    )
+
+# Plot chronic load (baseline)
+plt.plot(df["date"], df["dailyTrainingLoadChronic"], 
+         label="Chronic (long-term)", color="blue", linewidth=2)
+
+# Plot acute load (recent)
+plt.plot(df["date"], df["dailyTrainingLoadAcute"], 
+         label="Acute (recent)", color="red", linewidth=1, linestyle="dashed")
+
+# # Shade ACWR zones
+# plt.fill_between(df["date"],
+#                  df["dailyTrainingLoadChronic"]*ACWR_optimal[0],
+#                  df["dailyTrainingLoadChronic"]*ACWR_optimal[1],
+#                  color="green", alpha=0.2, label="Optimal ACWR (0.8–1.3)")
+
+# Handles for chronic and acute lines
+chronic_line = plt.Line2D([0], [0], color="blue", linewidth=2, label="Chronic (long-term)")
+acute_line = plt.Line2D([0], [0], color="red", linewidth=2, label="Acute (recent)")
+
+plt.xlabel("Date")
+plt.ylabel("Training Load")
+plt.legend(handles=phase_patches + [chronic_line, acute_line])
+plt.grid(alpha=0.3)
+plt.tight_layout()
+plt.savefig(f"{OUTPUT_DIR}/acute_chronic_load_plot.jpg")
 
 
 
