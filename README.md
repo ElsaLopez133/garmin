@@ -10,10 +10,9 @@ This project allows you to download, merge, and analyze Garmin data including **
 
 ## Features
 
-- Download last 3 months (or more) of Garmin data.
+- Download last x days of Garmin data.
 - Merge HRV, resting heart rate, sleep, and menstrual cycle into a single CSV for analysis.
 - Handles missing data.
-- Optional progress bars to visualize download progress.
 
 ---
 
@@ -42,20 +41,13 @@ C:\Users\<YourUser>\AppData\Roaming\Python\Python312\Scripts
 
 ### Option 1 — Python Script
 
-1. Edit garmin_download.py and replace:
-
-```bash
-EMAIL = "your_email"
-PASSWORD = "your_password"
-```
-
-2. Run the script:
+1. Run the script:
 
 ```bash
 python garmin_download.py
 ```
 
-3. Output: garmin_data_last_xdays.csv containing columns: date, resting_hr, hrv_rmssd, sleep_hours, cycle_phase
+2. Output: garmin_data_last_xdays.csv
 
 ### Option 2 — Garmin Exporter Command-Line
 
