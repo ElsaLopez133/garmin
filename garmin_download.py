@@ -32,6 +32,78 @@ def fetch_menstrual_calendar(api, start_date, end_date):
 
     return all_entries
 
+def build_calendar_days(calendar_entries):
+    calendar_days = {}
+
+    for idx, entry in enumerate(calendar_entries):
+        start = datetime.fromisoformat(entry["startDate"]).date()
+        period_len = int(entry.get("periodLength", 1) or 1)
+
+        fertile_start = entry.get("fertileWindowStart", None)
+        fertile_len = int(entry.get("lengthOfFertileWindow", 0) or 0)
+
+        next_start = None
+        if idx + 1 < len(calendar_entries):
+            next_start = datetime.fromisoformat(calendar_entries[idx + 1]["startDate"]).date()
+
+        # 1) Menstrual
+        for d in range(period_len):
+            day = start + timedelta(days=d)
+            calendar_days[day.isoformat()] = "Menstrual"
+
+        # Decide fertile window start/end
+        if fertile_start is not None and fertile_len > 0:
+            fertile_window_start = start + timedelta(days=int(fertile_start))
+            fertile_window_end = fertile_window_start + timedelta(days=fertile_len - 1)
+        else:
+            # Fallback: 7-day fertile window in the middle (requires next_start)
+            if next_start is None:
+                continue
+            cycle_len = (next_start - start).days
+            fertile_len = 7
+            mid = start + timedelta(days=cycle_len // 2)
+            fertile_window_start = mid - timedelta(days=fertile_len // 2)
+            fertile_window_end = fertile_window_start + timedelta(days=fertile_len - 1)
+
+            # clamp so it doesn't overlap menstrual or go beyond cycle end
+            min_start = start + timedelta(days=period_len)
+            max_end = next_start - timedelta(days=1)
+            if fertile_window_start < min_start:
+                fertile_window_start = min_start
+                fertile_window_end = fertile_window_start + timedelta(days=fertile_len - 1)
+            if fertile_window_end > max_end:
+                fertile_window_end = max_end
+                fertile_window_start = fertile_window_end - timedelta(days=fertile_len - 1)
+
+        # 2) Follicular: after period -> day before fertile window
+        fol_start = start + timedelta(days=period_len)
+        fol_end = fertile_window_start - timedelta(days=1)
+        day = fol_start
+        while day <= fol_end:
+            calendar_days[day.isoformat()] = "Follicular"
+            day += timedelta(days=1)
+
+        # 3) Fertile: Garmin window (or fallback window)
+        day = fertile_window_start
+        while day <= fertile_window_end:
+            # keep Menstrual if overlap (shouldn't happen, but safe)
+            if calendar_days.get(day.isoformat()) != "Menstrual":
+                calendar_days[day.isoformat()] = "Fertile"
+            day += timedelta(days=1)
+
+        # 4) Luteal: after fertile -> day before next period (best with next_start)
+        lut_start = fertile_window_end + timedelta(days=1)
+        lut_end = (next_start - timedelta(days=1)) if next_start else (lut_start + timedelta(days=13))
+
+        day = lut_start
+        while day <= lut_end:
+            if calendar_days.get(day.isoformat()) != "Menstrual":
+                calendar_days[day.isoformat()] = "Luteal"
+            day += timedelta(days=1)
+
+    return calendar_days
+
+
 # To run directly: "C:\Users\elsal\AppData\Roaming\Python\Python312\Scripts\garmin-backup.exe" elsa.lopez.133@outlook.es --password  'xxxxxxxxx' --backup-dir .\garmin_data
 # 👉 Your Garmin login
 EMAIL = input("Email: ")
@@ -190,55 +262,19 @@ for date in tqdm(date_list):
 print("\n🌸 Downloading Menstrual Cycle data...")
 
 # Create a lookup table: each date mapped to its phase
-calendar_days = {}
 calendar_entries = fetch_menstrual_calendar(api, start_date, today)
-#print(calendar_entries)
+print(calendar_entries)
+# Sanity check
+for i, e in enumerate(calendar_entries[:-1]):
+    start = datetime.fromisoformat(e["startDate"]).date()
+    next_start = datetime.fromisoformat(calendar_entries[i+1]["startDate"]).date()
+    cycle_len = (next_start - start).days
+    fol_len = int(e["fertileWindowStart"]) - int(e["periodLength"])
+    print(e["startDate"], "cycle_len", cycle_len, "period", e["periodLength"],
+          "fertile_start", e["fertileWindowStart"], "follicular_len", fol_len,
+          "fertile_len", e["lengthOfFertileWindow"])
 
-for i, entry in enumerate(calendar_entries):
-    start = datetime.fromisoformat(entry['startDate']).date()
-    period_length = entry.get('periodLength', 1)
-    fertile_start = entry.get('fertileWindowStart', 0)
-    fertile_length = entry.get('lengthOfFertileWindow', 0)
-    
-    # Next cycle start if available
-    next_start = None
-    if i + 1 < len(calendar_entries):
-        next_start = datetime.fromisoformat(calendar_entries[i + 1]["startDate"]).date()
-
-    # --- Period ---
-    for i in range(period_length):
-        day = start + timedelta(days=i)
-        calendar_days[day.isoformat()] = "Menstrual"
-
-    # --- Follicular Phase (after period until fertile window) ---
-    if fertile_start > period_length:
-        follicular_start = start + timedelta(days=period_length)
-        follicular_end = start + timedelta(days=fertile_start - 1)
-        for j in range((follicular_end - follicular_start).days + 1):
-            day = follicular_start + timedelta(days=j)
-            if calendar_days.get(day.isoformat()) is None:
-                calendar_days[day.isoformat()] = "Follicular"
-
-    # --- Fertile Window & Ovulation ---
-    fertile_window_start_date = start + timedelta(days=fertile_start)
-    for i in range(fertile_length):
-        day = fertile_window_start_date + timedelta(days=i)
-        if calendar_days.get(day.isoformat()) is None:
-            calendar_days[day.isoformat()] = "Fertile"
-
-    # Ovulation = middle of fertile window
-    if fertile_length > 0:
-        ovulation_day = fertile_window_start_date + timedelta(days=fertile_length // 2)
-        calendar_days[ovulation_day.isoformat()] = "Ovulation"
-
-    # --- Luteal Phase (after ovulation until next period, approximate) ---
-    luteal_start = ovulation_day + timedelta(days=1)
-    # Assume luteal phase ends at 28 days cycle (can adjust if you have next period info)
-    luteal_end = next_start - timedelta(days=1) if next_start else luteal_start + timedelta(days=13)
-    for i in range((luteal_end - luteal_start).days + 1):
-        day = luteal_start + timedelta(days=i)
-        if calendar_days.get(day.isoformat()) is None:
-            calendar_days[day.isoformat()] = "Luteal"
+calendar_days = build_calendar_days(calendar_entries)
 
 # Fill in the cycle list for the requested date range
 cycle_list = []
