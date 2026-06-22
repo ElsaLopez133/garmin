@@ -1,6 +1,7 @@
-from garminconnect import Garmin
+from garminconnect import Garmin, GarminConnectTooManyRequestsError
 import json, os, csv
 from datetime import date, timedelta, datetime
+import time
 from tqdm import tqdm  # Progress bar library
 import pandas as pd
 import getpass
@@ -35,6 +36,14 @@ def fetch_menstrual_calendar(api, start_date, end_date):
 def build_calendar_days(calendar_entries):
     calendar_days = {}
 
+    # Pre-compute average cycle length from all complete cycles (used for last cycle fallback)
+    complete_cycle_lengths = []
+    for i in range(len(calendar_entries) - 1):
+        s_i = datetime.fromisoformat(calendar_entries[i]["startDate"]).date()
+        s_next = datetime.fromisoformat(calendar_entries[i + 1]["startDate"]).date()
+        complete_cycle_lengths.append((s_next - s_i).days)
+    avg_cycle_len = round(sum(complete_cycle_lengths) / len(complete_cycle_lengths)) if complete_cycle_lengths else 28
+
     for idx, entry in enumerate(calendar_entries):
         start = datetime.fromisoformat(entry["startDate"]).date()
         period_len = int(entry.get("periodLength", 1) or 1)
@@ -45,6 +54,9 @@ def build_calendar_days(calendar_entries):
         next_start = None
         if idx + 1 < len(calendar_entries):
             next_start = datetime.fromisoformat(calendar_entries[idx + 1]["startDate"]).date()
+        else:
+            # Estimate next period start using average cycle length
+            next_start = start + timedelta(days=avg_cycle_len)
 
         # 1) Menstrual
         for d in range(period_len):
@@ -56,9 +68,7 @@ def build_calendar_days(calendar_entries):
             fertile_window_start = start + timedelta(days=int(fertile_start))
             fertile_window_end = fertile_window_start + timedelta(days=fertile_len - 1)
         else:
-            # Fallback: 7-day fertile window in the middle (requires next_start)
-            if next_start is None:
-                continue
+            # Fallback: 7-day fertile window in the middle
             cycle_len = (next_start - start).days
             fertile_len = 7
             mid = start + timedelta(days=cycle_len // 2)
@@ -83,17 +93,17 @@ def build_calendar_days(calendar_entries):
             calendar_days[day.isoformat()] = "Follicular"
             day += timedelta(days=1)
 
-        # 3) Fertile: Garmin window (or fallback window)
-        day = fertile_window_start
-        while day <= fertile_window_end:
-            # keep Menstrual if overlap (shouldn't happen, but safe)
+        # 3) Fertile window split: first half -> Follicular, second half -> Luteal
+        # Odd-length windows: the middle day goes to Luteal (closer to ovulation)
+        fertile_days = [fertile_window_start + timedelta(days=i) for i in range(fertile_len)]
+        split = fertile_len // 2
+        for i, day in enumerate(fertile_days):
             if calendar_days.get(day.isoformat()) != "Menstrual":
-                calendar_days[day.isoformat()] = "Fertile"
-            day += timedelta(days=1)
+                calendar_days[day.isoformat()] = "Follicular" if i < split else "Luteal"
 
-        # 4) Luteal: after fertile -> day before next period (best with next_start)
+        # 4) Luteal: after fertile window -> day before next period
         lut_start = fertile_window_end + timedelta(days=1)
-        lut_end = (next_start - timedelta(days=1)) if next_start else (lut_start + timedelta(days=13))
+        lut_end = next_start - timedelta(days=1)
 
         day = lut_start
         while day <= lut_end:
@@ -104,6 +114,38 @@ def build_calendar_days(calendar_entries):
     return calendar_days
 
 
+def login_with_retry(api, max_attempts=5, base_delay=15):
+    """Retry Garmin login when Garmin Connect temporarily rate-limits auth."""
+    def is_rate_limit_error(exc):
+        current = exc
+        while current is not None:
+            message = str(current).lower()
+            if "429" in message or "too many requests" in message or "rate limit" in message:
+                return True
+            current = current.__cause__ or current.__context__
+        return False
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            api.login()
+            return
+        except Exception as exc:
+            if not (
+                isinstance(exc, GarminConnectTooManyRequestsError)
+                or is_rate_limit_error(exc)
+            ):
+                raise
+            if attempt == max_attempts:
+                raise
+            wait_seconds = base_delay * (2 ** (attempt - 1))
+            print(
+                f"⚠️ Garmin rate-limited login ({exc}). "
+                f"Retrying in {wait_seconds} seconds "
+                f"({attempt}/{max_attempts})..."
+            )
+            time.sleep(wait_seconds)
+
+
 # To run directly: "C:\Users\elsal\AppData\Roaming\Python\Python312\Scripts\garmin-backup.exe" elsa.lopez.133@outlook.es --password  'xxxxxxxxx' --backup-dir .\garmin_data
 # 👉 Your Garmin login
 EMAIL = input("Email: ")
@@ -112,7 +154,7 @@ PASSWORD = getpass.getpass("Password: ")
 # ---- LOGIN ----
 print("🔐 Logging in to Garmin Connect...")
 api = Garmin(EMAIL, PASSWORD)
-api.login()
+login_with_retry(api)
 
 # ---- SELECT NUMBER OF DAYS ----
 while True:
@@ -503,5 +545,3 @@ df_all = flatten_dict_column(df_all, "baseline", "baseline")
 
 df_all.to_csv(f"{OUTPUT_DIR}/garmin_data_{DAYS_BACK}days.csv", index=False)
 print(f"\n✅ Done! Saved to {OUTPUT_DIR}/garmin_data_{DAYS_BACK}days.csv")
-
-

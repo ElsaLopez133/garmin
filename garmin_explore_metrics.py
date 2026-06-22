@@ -1,12 +1,14 @@
-from garminconnect import Garmin
+from garminconnect import Garmin, GarminConnectTooManyRequestsError
 import json, os
 from datetime import date, timedelta
+import getpass
+import time
 from tqdm import tqdm
 
 # ---------- CONFIG ----------
 
 EMAIL = input("Email Garmin: ")
-PASSWORD = input("Password: ")
+PASSWORD = getpass.getpass("Password: ")
 
 OUTPUT_DIR = "./data/garmin_keys_explore"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -61,11 +63,43 @@ def explore_endpoint(api, func_name, args, prefix):
         return f"❌ Error fetching {prefix}: {e}\n", None
 
 
+def login_with_retry(api, max_attempts=5, base_delay=15):
+    """Retry Garmin login when Garmin Connect temporarily rate-limits auth."""
+    def is_rate_limit_error(exc):
+        current = exc
+        while current is not None:
+            message = str(current).lower()
+            if "429" in message or "too many requests" in message or "rate limit" in message:
+                return True
+            current = current.__cause__ or current.__context__
+        return False
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            api.login()
+            return
+        except Exception as exc:
+            if not (
+                isinstance(exc, GarminConnectTooManyRequestsError)
+                or is_rate_limit_error(exc)
+            ):
+                raise
+            if attempt == max_attempts:
+                raise
+            wait_seconds = base_delay * (2 ** (attempt - 1))
+            print(
+                f"⚠️ Garmin rate-limited login ({exc}). "
+                f"Retrying in {wait_seconds} seconds "
+                f"({attempt}/{max_attempts})..."
+            )
+            time.sleep(wait_seconds)
+
+
 # ---------- LOGIN ----------
 
 print("🔐 Logging in to Garmin Connect...")
 api = Garmin(EMAIL, PASSWORD)
-api.login()
+login_with_retry(api)
 
 # ---------- METRICS TO EXPLORE ----------
 

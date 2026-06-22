@@ -4,5 +4,13 @@ analysis_results/
 temp/
 .venv/
 .json
+.idea
 *.env
 __pycache__/
+collector/GOOGLE_FORM.md
+collector/PARTICIPANT_GUIDE.md
+CLAUDE.md
+collector/upload_endpoints.gs
+
+build/
+collector/BUILD.md
