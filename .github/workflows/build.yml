@@ -1,0 +1,56 @@
+name: Build collector apps
+
+# Builds the participant app for Windows and macOS on GitHub's cloud machines,
+# so you don't need to own either OS. Download the finished files from the run's
+# "Artifacts" section, then drop them in your Drive folder.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'collector/garmin_collector.py'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:        # lets you trigger a build manually from the Actions tab
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: GarminCollector-windows
+          - os: macos-latest
+            artifact: GarminCollector-mac
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install garminconnect pandas numpy requests pyinstaller
+
+      - name: Build app
+        run: pyinstaller --onefile --windowed --name GarminCollector collector/garmin_collector.py
+
+      - name: Zip macOS app bundle
+        if: runner.os == 'macOS'
+        run: cd dist && zip -r GarminCollector-mac.zip GarminCollector.app
+
+      - name: Upload Windows .exe
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/GarminCollector.exe
+
+      - name: Upload macOS .zip
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/GarminCollector-mac.zip
