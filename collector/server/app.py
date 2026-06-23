@@ -77,6 +77,20 @@ OVERNIGHT_OPTIONS = ["Most nights", "Some nights", "Rarely"]
 CONDITION_OPTIONS = ["PCOS", "Endometriosis", "Thyroid condition", "None", "Prefer not to say"]
 
 
+def _ensure_display_name(api):
+    """garminconnect's return_on_mfa login path can return before loading the profile,
+    leaving api.display_name = None — which breaks every endpoint whose URL contains it
+    (resting HR, sleep, ...) with a 403 on '.../None'. Populate it if missing."""
+    if getattr(api, "display_name", None):
+        return
+    # garth.profile lazily loads /userprofile-service/socialProfile and caches it
+    # (this is the same source garminconnect's own login uses).
+    profile = api.garth.profile
+    if isinstance(profile, dict):
+        api.display_name = profile.get("displayName")
+        api.full_name = profile.get("fullName")
+
+
 def _start_download_job(api, days, meta):
     job_id = uuid.uuid4().hex
     JOBS[job_id] = {"status": "Starting…", "done": False, "error": None,
@@ -84,6 +98,7 @@ def _start_download_job(api, days, meta):
 
     def run():
         try:
+            _ensure_display_name(api)
             df = garmin_fetch.download_dataframe(
                 api, days, status=lambda m: JOBS[job_id].update(status=m))
             for key, value in meta.items():
@@ -97,6 +112,17 @@ def _start_download_job(api, days, meta):
 
     threading.Thread(target=run, daemon=True).start()
     return job_id
+
+
+def _is_rate_limit(exc):
+    """True if the exception chain looks like a Garmin 429 / rate-limit."""
+    cur = exc
+    while cur is not None:
+        m = str(cur).lower()
+        if "429" in m or "too many requests" in m or "rate limit" in m:
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return False
 
 
 def _index_ctx(extra=None):
@@ -137,9 +163,14 @@ def start(request: Request, email: str = Form(...), password: str = Form(...),
         api = Garmin(email=email, password=password, return_on_mfa=True)
         result = api.login()
     except Exception as e:  # noqa: BLE001
-        return templates.TemplateResponse(
-            request, "index.html",
-            _index_ctx({"error": f"Could not log in to Garmin: {e}"}), status_code=400)
+        if _is_rate_limit(e):
+            msg = ("Garmin is temporarily limiting sign-ins because of too many recent "
+                   "attempts. This is not a problem with your account — please wait about "
+                   "30 minutes and try again.")
+        else:
+            msg = "Could not log in to Garmin. Please double-check your email and password and try again."
+        return templates.TemplateResponse(request, "index.html",
+                                          _index_ctx({"error": msg}), status_code=400)
     finally:
         # Drop the local reference to the password as soon as login is attempted.
         password = None
