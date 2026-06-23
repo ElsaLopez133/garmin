@@ -37,6 +37,36 @@ function doPost(e) {
   }
 }
 
+/**
+ * doGet — list or download the collected CSVs.
+ *   ?token=...                -> JSON list of filenames: ["garmin_data_xxx.csv", ...]
+ *   ?token=...&download=1     -> JSON [{name, data(base64)}, ...] for every CSV
+ * Used by collector/fetch_uploads.py to pull all uploads to your machine.
+ */
+function doGet(e) {
+  try {
+    var p = e.parameter || {};
+    if (p.token !== UPLOAD_TOKEN) {
+      return _text("forbidden");
+    }
+    var files = DriveApp.getFolderById(FOLDER_ID).getFiles();
+    var out = [];
+    while (files.hasNext()) {
+      var f = files.next();
+      if (p.download) {
+        out.push({ name: f.getName(),
+                   data: Utilities.base64Encode(f.getBlob().getBytes()) });
+      } else {
+        out.push(f.getName());
+      }
+    }
+    return ContentService.createTextOutput(JSON.stringify(out))
+                         .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return _text("error: " + err);
+  }
+}
+
 function _text(s) {
   return ContentService.createTextOutput(s).setMimeType(ContentService.MimeType.TEXT);
 }
