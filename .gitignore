@@ -1,19 +1,25 @@
-figs/
+# Data & outputs
 data/
+figs/
 analysis_results/
 temp/
-.venv/
-.json
-.idea
-*.env
-__pycache__/
-collector/GOOGLE_FORM.md
-collector/PARTICIPANT_GUIDE.md
-CLAUDE.md
-collector/upload_endpoints.gs
 
+# Environments & caches
+.venv/
+__pycache__/
+*.env
+.idea/
+
+# Build artifacts
 build/
-collector/BUILD.md
 dist/
 *.spec
 collector/server/uploads/
+
+# Local-only docs (kept out of the public repo)
+CLAUDE.md
+collector/ARCHITECTURE.md
+collector/GOOGLE_FORM.md
+collector/desktop/BUILD.md
+collector/desktop/PARTICIPANT_GUIDE.md
+collector/server/README.md

@@ -1,0 +1,21 @@
+# Full project environment (personal scripts + analysis + collector).
+# The deployed server uses the slimmer collector/server/requirements.txt.
+
+# Core data + Garmin
+garminconnect
+pandas
+numpy
+tqdm
+
+# Plotting & analysis
+matplotlib
+seaborn
+scipy
+scikit-learn
+
+# Collector web server (also needed to build the desktop app)
+fastapi
+uvicorn[standard]
+jinja2
+python-multipart
+requests
