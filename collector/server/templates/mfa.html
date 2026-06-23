@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Verification code</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 480px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    input { width: 100%; padding: .55rem; font-size: 1.2rem; border: 1px solid #bbb; border-radius: 6px; box-sizing: border-box; letter-spacing: .2em; text-align: center; }
+    button { width: 100%; padding: .8rem; font-size: 1rem; background: #0a6; color: #fff; border: 0; border-radius: 6px; margin-top: 1rem; cursor: pointer; }
+    .error { background: #fdecea; border-left: 4px solid #c0392b; padding: .6rem 1rem; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Enter your verification code</h1>
+  <p>Garmin just sent you a verification code (by email or text). Enter it below.</p>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="post" action="/mfa">
+    <input type="hidden" name="token" value="{{ token }}">
+    <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" required autofocus>
+    <button type="submit">Continue</button>
+  </form>
+</body>
+</html>

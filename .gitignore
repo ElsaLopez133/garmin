@@ -16,3 +16,4 @@ build/
 collector/BUILD.md
 dist/
 *.spec
+collector/server/uploads/

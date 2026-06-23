@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Downloading…</title>
+  {% if not job.done %}<meta http-equiv="refresh" content="3">{% endif %}
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 480px; margin: 3rem auto; padding: 0 1rem; color: #222; text-align: center; }
+    .spinner { width: 38px; height: 38px; margin: 1rem auto; border: 4px solid #ddd; border-top-color: #0a6; border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .id { font-family: monospace; font-size: 1.3rem; background: #eef6f0; padding: .4rem .8rem; border-radius: 6px; display: inline-block; }
+    .error { background: #fdecea; border-left: 4px solid #c0392b; padding: .6rem 1rem; border-radius: 6px; text-align: left; }
+  </style>
+</head>
+<body>
+  {% if not job.done %}
+    <div class="spinner"></div>
+    <p><strong>{{ job.status }}</strong></p>
+    <p>Please keep this page open — this can take a few minutes.</p>
+  {% elif job.error %}
+    <h1>Something went wrong</h1>
+    <p class="error">{{ job.error }}</p>
+    <p><a href="/">Try again</a></p>
+  {% else %}
+    <h1>Done — thank you! ✓</h1>
+    <p>Your data was downloaded and saved successfully.</p>
+    <p>Your anonymous ID is:</p>
+    <p class="id">{{ job.participant_id }}</p>
+    <p>If a form asked for it, paste this ID there. You can now close this page.</p>
+  {% endif %}
+</body>
+</html>

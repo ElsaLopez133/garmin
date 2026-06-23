@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Garmin Cycle Study</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 540px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    h1 { font-size: 1.4rem; }
+    .privacy { background: #eef6f0; border-left: 4px solid #0a6; padding: .7rem 1rem; border-radius: 6px; font-size: .9rem; }
+    label { display: block; margin: .9rem 0 .25rem; font-weight: 600; font-size: .9rem; }
+    input, select { width: 100%; padding: .55rem; font-size: 1rem; border: 1px solid #bbb; border-radius: 6px; box-sizing: border-box; }
+    .consent { display: flex; gap: .5rem; align-items: flex-start; margin: 1.2rem 0; font-size: .9rem; }
+    .consent input { width: auto; margin-top: .2rem; }
+    .checks { display: flex; flex-wrap: wrap; gap: .4rem 1rem; margin-top: .3rem; }
+    .check { display: inline-flex; align-items: center; gap: .35rem; font-weight: normal; margin: 0; font-size: .9rem; }
+    .check input { width: auto; }
+    button { width: 100%; padding: .8rem; font-size: 1rem; background: #0a6; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
+    .error { background: #fdecea; border-left: 4px solid #c0392b; padding: .6rem 1rem; border-radius: 6px; }
+    .info { line-height: 1.5; }
+    .info p { margin: .6rem 0; }
+    details { background: #f6f6f6; border-radius: 6px; padding: .6rem 1rem; margin: 1rem 0; }
+    summary { cursor: pointer; font-weight: 600; }
+    .privacy { background: #eef6f0; border-left: 4px solid #0a6; padding: .7rem 1rem; border-radius: 6px; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <h1>Garmin Cycle Study</h1>
+
+  <div class="info">
+    <p>This study looks at how wearable health signals (heart rate, heart-rate
+    variability, sleep and stress) relate to the menstrual cycle, with the goal of
+    detecting cycle phases and ovulation. To do this I need data from many people, so
+    the patterns reflect real physiology and not just one body.</p>
+
+    <p class="privacy"><strong>Your privacy.</strong> Your Garmin email and password are
+    used only to download your health data, and are <strong>never stored</strong> — not on
+    this server, not in any file, database or log. Your health data is saved under an
+    <strong>anonymous ID</strong> (no name needed). Participation is voluntary.</p>
+
+    <details>
+      <summary>Read full information &amp; consent</summary>
+      <p><strong>What happens.</strong> When you submit this form, the server logs in to
+      Garmin with the details you enter, downloads your health metrics (heart rate, HRV,
+      sleep, stress, body battery, training and menstrual-cycle data) for roughly the past
+      year, and saves them as a file labelled only with a random ID.</p>
+
+      <p><strong>What we collect.</strong> The health metrics above, plus the few answers on
+      this page (age range, contraception, cycle regularity, device, conditions). No name,
+      no email, no Garmin password is stored.</p>
+
+      <p><strong>How your login is handled.</strong> Your email and password are sent over a
+      secure connection and used only at the moment of download. They are held in memory for
+      those few seconds and then discarded — they are never written to disk or logs, and the
+      researchers cannot see them or log in to your account afterwards.</p>
+
+      <p><strong>Voluntary &amp; withdrawal.</strong> Taking part is entirely voluntary. At the
+      end you will see an anonymous ID — <strong>keep it</strong>. To withdraw your data later,
+      email that ID to me at <a href="mailto:elsa.lopez-perez@inria.fr">elsa.lopez-perez@inria.fr</a>
+      and I will delete it.</p>
+
+      </details>
+  </div>
+
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+  <form method="post" action="/start">
+    <label>Garmin email</label>
+    <input type="email" name="email" required autocomplete="off">
+
+    <label>Garmin password</label>
+    <input type="password" name="password" required autocomplete="off">
+
+    <label>Age range</label>
+    <select name="age_range" required>
+      <option value="" disabled selected>— select —</option>
+      {% for a in ages %}<option>{{ a }}</option>{% endfor %}
+    </select>
+
+    <label>Do you use hormonal contraception?</label>
+    <select name="contraception" required>
+      <option value="" disabled selected>— select —</option>
+      {% for c in contraceptions %}<option>{{ c }}</option>{% endfor %}
+    </select>
+
+    <label>Are your cycles generally regular?</label>
+    <select name="cycle_regularity">
+      <option value="" selected>— select —</option>
+      {% for r in regularities %}<option>{{ r }}</option>{% endfor %}
+    </select>
+
+    <label>Garmin device model (optional)</label>
+    <input type="text" name="device_model" placeholder="e.g. Venu 3">
+
+    <label>Do you usually wear your Garmin while sleeping?</label>
+    <select name="wears_overnight" required>
+      <option value="" disabled selected>— select —</option>
+      {% for w in overnight_options %}<option>{{ w }}</option>{% endfor %}
+    </select>
+
+    <label>Any relevant conditions? (optional, tick any that apply)</label>
+    <div class="checks">
+      {% for cond in condition_options %}
+      <label class="check"><input type="checkbox" name="conditions" value="{{ cond }}"> {{ cond }}</label>
+      {% endfor %}
+    </div>
+
+    <div class="consent">
+      <input type="checkbox" name="consent" id="consent" value="yes">
+      <label for="consent" style="font-weight: normal; margin: 0;">I have read the information
+        above and consent to take part. I understand my login is used only to download my data
+        and is not stored.</label>
+    </div>
+
+    <button type="submit">Download &amp; send my data</button>
+  </form>
+</body>
+</html>
