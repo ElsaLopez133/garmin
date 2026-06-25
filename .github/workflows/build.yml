@@ -35,7 +35,9 @@ jobs:
         run: pip install garminconnect==0.2.38 garth==0.5.21 pandas numpy requests pyinstaller
 
       - name: Build app
-        run: pyinstaller --onefile --windowed --name GarminCollector collector/desktop/garmin_collector.py
+        # --paths collector lets PyInstaller find & bundle the shared
+        # garmin_fetch.py that garmin_collector.py imports.
+        run: pyinstaller --onefile --windowed --name GarminCollector --paths collector collector/desktop/garmin_collector.py
 
       - name: Zip macOS app bundle
         if: runner.os == 'macOS'

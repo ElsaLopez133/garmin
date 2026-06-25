@@ -6,12 +6,24 @@ Imported by both the desktop collector and the FastAPI server so the fetch logic
 lives in one place.
 """
 
+import os
 import time
 from datetime import date, datetime, timedelta
 
 import numpy as np
 import pandas as pd
 from garminconnect import GarminConnectTooManyRequestsError
+
+ALL_METRICS = ["hrv", "rhr", "sleep", "cycle", "stress", "body_battery", "training"]
+MINIMAL_METRICS = ["hrv", "rhr", "sleep", "cycle"]
+
+CALL_DELAY = float(os.environ.get("GARMIN_CALL_DELAY", "0.25"))
+
+
+def _pace():
+    """Small pause between Garmin API calls to avoid bursting"""
+    if CALL_DELAY > 0:
+        time.sleep(CALL_DELAY)
 
 
 def fetch_menstrual_calendar(api, start_date, end_date):
@@ -25,6 +37,7 @@ def fetch_menstrual_calendar(api, start_date, end_date):
             all_entries.extend(chunk.get("cycleSummaries", []))
         except Exception as e:
             print(f"Failed to fetch cycle {current_start}..{current_end}: {e}")
+        _pace()
         current_start = current_end + timedelta(days=1)
     return all_entries
 
@@ -125,16 +138,8 @@ def login_with_retry(api, max_attempts=5, base_delay=15):
             time.sleep(base_delay * (2 ** (attempt - 1)))
 
 
-def download_dataframe(api, days_back, status=lambda m: None):
-    """Download all metrics and return the merged DataFrame (study CSV schema)."""
-    today = date.today()
-    start_date = today - timedelta(days=days_back)
-    date_list = [start_date + timedelta(days=i) for i in range(days_back + 1)]
-
-    hrv_list, rhr_list, sleep_list, cycle_list = [], [], [], []
-    stress_list, body_battery_list, training_load_list, training_status_list = [], [], [], []
-
-    status("Downloading HRV…")
+def _fetch_hrv(api, date_list):
+    hrv_list = []
     last_weekly_avg = last_baseline = None
     for d in date_list:
         try:
@@ -155,8 +160,12 @@ def download_dataframe(api, days_back, status=lambda m: None):
         except Exception:
             hrv_list.append({"date": d.isoformat(), "hrv_rmssd": None, "status": None, "weekly_avg": None,
                              "lastnight_5min_high": None, "baseline": None, "feedback_phrase": None})
+        _pace()
+    return hrv_list
 
-    status("Downloading resting heart rate…")
+
+def _fetch_rhr(api, date_list):
+    rhr_list = []
     for d in date_list:
         try:
             data = api.get_rhr_day(d.isoformat())
@@ -167,8 +176,12 @@ def download_dataframe(api, days_back, status=lambda m: None):
                 rhr_list.append({"date": d.isoformat(), "resting_hr": None})
         except Exception:
             rhr_list.append({"date": d.isoformat(), "resting_hr": None})
+        _pace()
+    return rhr_list
 
-    status("Downloading sleep…")
+
+def _fetch_sleep(api, date_list):
+    sleep_list = []
     for d in date_list:
         try:
             data = api.get_sleep_data(d.isoformat())
@@ -197,14 +210,20 @@ def download_dataframe(api, days_back, status=lambda m: None):
                 "sleep_need_feedback": s.get("sleepNeed", {}).get("feedback")})
         except Exception:
             continue
+        finally:
+            _pace()
+    return sleep_list
 
-    status("Downloading menstrual cycle…")
+
+def _fetch_cycle(api, date_list, start_date, today):
     calendar_entries = fetch_menstrual_calendar(api, start_date, today)
     calendar_days = build_calendar_days(calendar_entries)
-    for d in date_list:
-        cycle_list.append({"date": d.isoformat(), "cycle_phase": calendar_days.get(d.isoformat(), "Not logged")})
+    return [{"date": d.isoformat(), "cycle_phase": calendar_days.get(d.isoformat(), "Not logged")}
+            for d in date_list]
 
-    status("Downloading stress…")
+
+def _fetch_stress(api, date_list):
+    stress_list = []
     for d in date_list:
         try:
             data = api.get_stress_data(d.isoformat())
@@ -215,20 +234,37 @@ def download_dataframe(api, days_back, status=lambda m: None):
                 stress_list.append({"date": d.isoformat(), "maxStressLevel": None, "avgStressLevel": None})
         except Exception:
             stress_list.append({"date": d.isoformat(), "maxStressLevel": None, "avgStressLevel": None})
+        _pace()
+    return stress_list
 
-    status("Downloading body battery…")
-    for d in date_list:
+
+def _fetch_body_battery(api, date_list, start_date, today):
+    # get_body_battery accepts a date range, so fetch in chunks instead of one
+    # call per day (≈366 calls -> a handful). Index by date, emit one row/day.
+    bb_by_date = {}
+    max_range_days = 28
+    current_start = start_date
+    while current_start <= today:
+        current_end = min(current_start + timedelta(days=max_range_days - 1), today)
         try:
-            data = api.get_body_battery(d.isoformat())
-            if data and isinstance(data, list) and data[0]:
-                bb = data[0]
-                body_battery_list.append({"date": d.isoformat(), "charged": bb.get("charged"), "drained": bb.get("drained")})
-            else:
-                body_battery_list.append({"date": d.isoformat(), "charged": None, "drained": None})
+            data = api.get_body_battery(current_start.isoformat(), current_end.isoformat())
+            for day in (data or []):
+                ds = day.get("date")
+                if ds:
+                    bb_by_date[ds] = {"charged": day.get("charged"), "drained": day.get("drained")}
         except Exception:
-            body_battery_list.append({"date": d.isoformat(), "charged": None, "drained": None})
+            pass
+        _pace()
+        current_start = current_end + timedelta(days=1)
+    out = []
+    for d in date_list:
+        rec = bb_by_date.get(d.isoformat(), {"charged": None, "drained": None})
+        out.append({"date": d.isoformat(), "charged": rec["charged"], "drained": rec["drained"]})
+    return out
 
-    status("Downloading training status…")
+
+def _fetch_training(api, date_list):
+    training_load_list, training_status_list = [], []
     empty_load = {"monthlyLoadAerobicLow": None, "monthlyLoadAerobicHigh": None, "monthlyLoadAnaerobic": None,
                   "monthlyLoadAerobicLowTargetMin": None, "monthlyLoadAerobicLowTargetMax": None,
                   "monthlyLoadAerobicHighTargetMin": None, "monthlyLoadAerobicHighTargetMax": None,
@@ -269,12 +305,58 @@ def download_dataframe(api, days_back, status=lambda m: None):
             training_load_list.append({"date": d.isoformat(), **empty_load})
             training_status_list.append({"date": d.isoformat(), **empty_status})
             continue
+        finally:
+            _pace()
+    return training_load_list, training_status_list
+
+
+def download_dataframe(api, days_back, status=lambda m: None, metrics=None):
+    """Download the selected metrics and return the merged DataFrame.
+
+    `metrics` selects which metrics to pull (default MINIMAL_METRICS; pass
+    ALL_METRICS for the full set).
+    """
+    metrics = MINIMAL_METRICS if metrics is None else metrics
+    today = date.today()
+    start_date = today - timedelta(days=days_back)
+    date_list = [start_date + timedelta(days=i) for i in range(days_back + 1)]
+
+    # name -> DataFrame for whatever was fetched (merged in dict-insertion order)
+    dfs = {}
+
+    if "hrv" in metrics:
+        status("Downloading HRV…")
+        dfs["hrv"] = pd.DataFrame(_fetch_hrv(api, date_list))
+
+    if "rhr" in metrics:
+        status("Downloading resting heart rate…")
+        dfs["rhr"] = pd.DataFrame(_fetch_rhr(api, date_list))
+
+    if "sleep" in metrics:
+        status("Downloading sleep…")
+        dfs["sleep"] = pd.DataFrame(_fetch_sleep(api, date_list))
+
+    if "cycle" in metrics:
+        status("Downloading menstrual cycle…")
+        dfs["cycle"] = pd.DataFrame(_fetch_cycle(api, date_list, start_date, today))
+
+    if "stress" in metrics:
+        status("Downloading stress…")
+        dfs["stress"] = pd.DataFrame(_fetch_stress(api, date_list))
+
+    if "body_battery" in metrics:
+        status("Downloading body battery…")
+        dfs["body_battery"] = pd.DataFrame(_fetch_body_battery(api, date_list, start_date, today))
+
+    if "training" in metrics:
+        status("Downloading training status…")
+        load_list, status_list = _fetch_training(api, date_list)
+        dfs["training_load"] = pd.DataFrame(load_list)
+        dfs["training_status"] = pd.DataFrame(status_list)
 
     status("Merging data…")
-    dfs = {"hrv": pd.DataFrame(hrv_list), "rhr": pd.DataFrame(rhr_list), "sleep": pd.DataFrame(sleep_list),
-           "cycle": pd.DataFrame(cycle_list), "stress": pd.DataFrame(stress_list),
-           "body_battery": pd.DataFrame(body_battery_list), "training_load": pd.DataFrame(training_load_list),
-           "training_status": pd.DataFrame(training_status_list)}
+    if not dfs:
+        return pd.DataFrame()
     for df in dfs.values():
         if "date" in df.columns:
             df["date"] = pd.to_datetime(df["date"])
