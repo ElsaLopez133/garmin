@@ -33,9 +33,21 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from garminconnect import Garmin
 
+# Load .env (repo root) into the environment for local dev BEFORE importing
+# anything that reads env vars at import time (proxies.py does). In hosted setups
+# (e.g. Render) there is no .env and the vars come from the dashboard — load_dotenv
+# is then a harmless no-op and never overrides a real environment variable.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+except ImportError:
+    pass  # python-dotenv not installed; rely on real environment variables
+
 # Make the shared fetch module importable whether run as a module or a script
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import garmin_fetch  # noqa: E402
+import proxies  # noqa: E402  (server/proxies.py — routes Garmin traffic through a proxy pool)
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = Path(os.environ.get("GARMIN_UPLOAD_DIR", BASE_DIR / "uploads"))
@@ -99,6 +111,10 @@ def _start_download_job(api, days, meta):
 
     def run():
         try:
+            # The download fires thousands of independent API calls; if the proxy
+            # dies mid-download, rotate to the next one per-call instead of losing
+            # the rest of the data silently.
+            proxies.install_request_retry(api)
             _ensure_display_name(api)
             df = garmin_fetch.download_dataframe(
                 api, days, status=lambda m: JOBS[job_id].update(status=m))
@@ -165,8 +181,12 @@ def _throttled_login(email, password):
         if gap < _MIN_LOGIN_GAP:
             time.sleep(_MIN_LOGIN_GAP - gap)
         api = Garmin(email=email, password=password, return_on_mfa=True)
+        # Route this session through the next proxy in the pool. with_proxy_retry
+        # retries the WHOLE login on a fresh proxy if the current one is down. The
+        # proxy then sticks to `api` for the MFA resume and the download thread.
+        proxies.apply_to(api)
         try:
-            result = api.login()
+            result = proxies.with_proxy_retry(api, api.login)
         except Exception as exc:
             if _is_rate_limit(exc):
                 _blocked_until = time.monotonic() + _RATE_LIMIT_COOLDOWN
@@ -224,6 +244,9 @@ def start(request: Request, email: str = Form(...), password: str = Form(...),
             msg = ("Garmin is temporarily limiting sign-ins because of too many recent "
                    "attempts. This is not a problem with your account — please wait about "
                    "30 minutes and try again.")
+        elif proxies.is_proxy_error(e):
+            msg = ("The server is having trouble reaching Garmin through its proxies right "
+                   "now. This is not a problem with your account — please try again shortly.")
         else:
             msg = "Could not log in to Garmin. Please double-check your email and password and try again."
         return templates.TemplateResponse(request, "index.html",
@@ -250,7 +273,9 @@ def mfa(request: Request, token: str = Form(...), code: str = Form(...)):
             request, "index.html",
             _index_ctx({"error": "Your session expired. Please start again."}), status_code=400)
     try:
-        entry["api"].resume_login(entry["client_state"], code.strip())
+        api = entry["api"]
+        proxies.with_proxy_retry(
+            api, lambda: api.resume_login(entry["client_state"], code.strip()))
     except Exception as e:  # noqa: BLE001
         return templates.TemplateResponse(
             request, "mfa.html",

@@ -19,8 +19,9 @@ But "not stored" is not the same as "never seen": while logging in, the server p
 ## Run it locally
 
 ```bash
+python3 -m venv .venv
 source .venv/bin/activate
-pip install fastapi "uvicorn[standard]" jinja2 python-multipart garminconnect pandas numpy
+pip install -r ./collector/server/requirements.txt
 uvicorn collector.server.app:app --reload
 ```
 Open <http://127.0.0.1:8000>. Test it with your own Garmin login first.
@@ -65,6 +66,7 @@ Keep secrets in env vars, **not** in the code — so they aren't committed to Gi
 ## Things to know
 
 - **Downloads are slow** (a year of data = thousands of Garmin API calls). The page shows a progress spinner and auto-refreshes; tell participants to keep the tab open. Jobs run in a background thread, so several people can run at once.
-- **Rate limits:** many logins/downloads from one server IP can trip Garmin's 429s. Fine for a handful of people; another reason not to scale this version large.
+- **Rate limits:** many logins/downloads from one server IP can trip Garmin's 429s. To spread traffic across IPs, each session is routed through a rotating SOCKS5 proxy pool (see `proxies.py`). Configure it with env vars: `GARMIN_USE_PROXY` (`1`/`0`), `USE_FREE_PROXIES` (`1` = free test pool, `0` = NordVPN), and `NORDVPN_USER` / `NORDVPN_PASSWORD` (NordVPN *service* credentials). Edit the proxy host lists in `proxies.py`. Still fine only for a handful of people — another reason not to scale this version large.
+- **Dead-proxy failover:** if a proxy is down or unresponsive, the server rotates to the next one and retries automatically — the whole login (or MFA) flow is retried on a fresh proxy, and during the download each call retries independently so a proxy dying mid-download doesn't silently truncate the data. Tune with `GARMIN_PROXY_MAX_RETRIES` (default 3). All proxy activity is logged under the `garmin.proxy` logger (level via `GARMIN_PROXY_LOG`, default `INFO`); credentials are scrubbed from log lines.
 - **State is in memory:** restarting the server drops in-flight jobs and pending MFA sessions (finished CSVs on disk are safe). Don't redeploy mid-collection.
 - **No password logging:** keep it that way — don't enable debug/verbose request logging, and don't add an error tracker that captures local variables on that endpoint.
