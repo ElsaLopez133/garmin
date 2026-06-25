@@ -13,7 +13,9 @@ We handle it as safely as possible:
   - run behind HTTPS in production
 
 Run locally:
-    pip install fastapi "uvicorn[standard]" jinja2 python-multipart garminconnect pandas numpy
+    python -m venv .venv
+    source .venv/bin/activate
+    pip install -r collector/server/requirements.txt
     uvicorn collector.server.app:app --reload
 Then open http://127.0.0.1:8000
 """

@@ -2,8 +2,8 @@
 # The deployed server uses the slimmer collector/server/requirements.txt.
 
 # Core data + Garmin
-garminconnect==0.2.38
-garth==0.5.21
+garminconnect==0.3.6
+garth==0.8.0
 pandas
 numpy
 tqdm

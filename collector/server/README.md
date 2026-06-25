@@ -19,8 +19,9 @@ But "not stored" is not the same as "never seen": while logging in, the server p
 ## Run it locally
 
 ```bash
+python -m venv .venv
 source .venv/bin/activate
-pip install fastapi "uvicorn[standard]" jinja2 python-multipart garminconnect pandas numpy
+pip install -r collector/server/requirements.txt
 uvicorn collector.server.app:app --reload
 ```
 Open <http://127.0.0.1:8000>. Test it with your own Garmin login first.
