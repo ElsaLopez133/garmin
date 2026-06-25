@@ -23,6 +23,7 @@ import os
 import secrets
 import sys
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -125,6 +126,56 @@ def _is_rate_limit(exc):
     return False
 
 
+# --- Login throttle + circuit breaker -------------------------------------
+# Garmin rate-limits its sign-in (SSO) endpoint per source IP. On a shared host
+# (e.g. Render) every participant logs in from the SAME outbound IP, so a burst
+# of sign-ins — or repeated "try again" clicks after a failure — can get the
+# whole server temporarily blocked. To stay under the limit we:
+#   1. serialize logins (only one at a time),
+#   2. keep a minimum gap between consecutive logins, and
+#   3. once Garmin returns a 429, stop attempting for a cooldown window instead
+#      of hammering and extending the ban.
+_LOGIN_LOCK = threading.Lock()
+_MIN_LOGIN_GAP = float(os.environ.get("GARMIN_MIN_LOGIN_GAP", "60"))               # seconds
+_RATE_LIMIT_COOLDOWN = float(os.environ.get("GARMIN_RATE_LIMIT_COOLDOWN", "1800"))  # seconds
+_last_login_ts = 0.0      # monotonic time of the last login attempt
+_blocked_until = 0.0      # monotonic time before which we refuse to attempt
+
+
+class _RateLimited(Exception):
+    """Raised when our own circuit breaker is open (we won't even call Garmin)."""
+
+    def __init__(self, retry_after):
+        super().__init__("rate limited")
+        self.retry_after = retry_after
+
+
+def _throttled_login(email, password):
+    """Log in to Garmin under a global throttle + circuit breaker.
+
+    Returns (api, login_result). Raises _RateLimited if the breaker is open, or
+    re-raises the underlying login error (after opening the breaker on a 429).
+    """
+    global _last_login_ts, _blocked_until
+    with _LOGIN_LOCK:
+        now = time.monotonic()
+        if now < _blocked_until:
+            raise _RateLimited(_blocked_until - now)
+        gap = now - _last_login_ts
+        if gap < _MIN_LOGIN_GAP:
+            time.sleep(_MIN_LOGIN_GAP - gap)
+        api = Garmin(email=email, password=password, return_on_mfa=True)
+        try:
+            result = api.login()
+        except Exception as exc:
+            if _is_rate_limit(exc):
+                _blocked_until = time.monotonic() + _RATE_LIMIT_COOLDOWN
+            raise
+        finally:
+            _last_login_ts = time.monotonic()
+        return api, result
+
+
 def _index_ctx(extra=None):
     ctx = {"default_days": DEFAULT_DAYS, "ages": AGE_OPTIONS,
            "contraceptions": CONTRACEPTION_OPTIONS, "regularities": REGULARITY_OPTIONS,
@@ -160,8 +211,14 @@ def start(request: Request, email: str = Form(...), password: str = Form(...),
             "conditions": "; ".join(conditions)}
 
     try:
-        api = Garmin(email=email, password=password, return_on_mfa=True)
-        result = api.login()
+        api, result = _throttled_login(email, password)
+    except _RateLimited as e:  # our circuit breaker is open — we didn't even call Garmin
+        wait_min = max(1, round(e.retry_after / 60))
+        msg = (f"Garmin is temporarily limiting sign-ins from this server because of too many "
+               f"recent attempts. This is not a problem with your account — please wait about "
+               f"{wait_min} minutes and try again.")
+        return templates.TemplateResponse(request, "index.html",
+                                          _index_ctx({"error": msg}), status_code=429)
     except Exception as e:  # noqa: BLE001
         if _is_rate_limit(e):
             msg = ("Garmin is temporarily limiting sign-ins because of too many recent "
