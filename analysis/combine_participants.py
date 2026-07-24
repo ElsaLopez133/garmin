@@ -29,9 +29,9 @@ def cycle_stats(df):
     """Return (n_cycles, avg_cycle_length, pct_phase_logged)."""
     if "cycle_phase" not in df.columns:
         return 0, None, 0.0
-    pct_logged = (df["cycle_phase"] != "Not logged").mean() * 100
-    is_m = df["cycle_phase"] == "Menstrual"
-    starts = list(df.loc[is_m & ~is_m.shift(1, fill_value=False), "date"])
+    is_period = df["is_period"] if "is_period" in df.columns else df["cycle_phase"] == "Period"
+    pct_logged = ((df["cycle_phase"] != "Not logged") | is_period).mean() * 100
+    starts = list(df.loc[is_period & ~is_period.shift(1, fill_value=False), "date"])
     if len(starts) >= 2:
         lengths = [(starts[i + 1] - starts[i]).days for i in range(len(starts) - 1)]
         avg = round(sum(lengths) / len(lengths), 1)

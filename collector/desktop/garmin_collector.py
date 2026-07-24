@@ -22,7 +22,7 @@ import requests
 from garminconnect import Garmin
 
 import tkinter as tk
-from tkinter import messagebox, simpledialog
+from tkinter import messagebox, simpledialog, ttk
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import garmin_fetch  # noqa: E402
@@ -69,6 +69,7 @@ class CollectorApp:
         root.resizable(False, False)
 
         self.participant_id = uuid.uuid4().hex[:8]
+        self._progress_n = 0
 
         pad = {"padx": 14, "pady": 3}
         tk.Label(root, text="Garmin Health Data Collector", font=("", 14, "bold")).pack(pady=(12, 2))
@@ -114,10 +115,26 @@ class CollectorApp:
         self.button.pack(pady=6)
 
         self.status_var = tk.StringVar(value="Ready.")
-        tk.Label(root, textvariable=self.status_var, fg="#0a6").pack(pady=(4, 10))
+        tk.Label(root, textvariable=self.status_var, fg="#0a6").pack(pady=(4, 2))
+
+        self.progress = ttk.Progressbar(root, length=420, mode="determinate")
+        self.progress.pack(pady=(0, 10))
 
     def status(self, msg):
         self.root.after(0, lambda: self.status_var.set(msg))
+
+    def reset_progress(self, total):
+        self._progress_n = 0
+        self.root.after(0, lambda: self.progress.configure(maximum=total, value=0))
+
+    def progress_status(self, msg):
+        """Status callback for download_dataframe: update the label and advance
+        the bar one notch as each metric (and the final merge) starts."""
+        self.status(msg)
+        if msg.startswith("Downloading") or msg.startswith("Merging"):
+            self._progress_n += 1
+            n = self._progress_n
+            self.root.after(0, lambda: self.progress.configure(value=n))
 
     def prompt_mfa(self):
         """Ask for the 2-factor code on the main thread and return it."""
@@ -165,7 +182,10 @@ class CollectorApp:
             api = Garmin(email=email, password=password, prompt_mfa=self.prompt_mfa)
             garmin_fetch.login_with_retry(api)
 
-            df = garmin_fetch.download_dataframe(api, days, self.status)
+            # One bar step per metric, plus the final "Merging data…" step.
+            metrics = garmin_fetch.MINIMAL_METRICS
+            self.reset_progress(len(metrics) + 1)
+            df = garmin_fetch.download_dataframe(api, days, self.progress_status, metrics=metrics)
 
             # Prepend the metadata as constant columns so each CSV is self-describing
             for key, value in meta.items():

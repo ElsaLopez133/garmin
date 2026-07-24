@@ -9,6 +9,7 @@ lives in one place.
 import os
 import time
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -18,6 +19,7 @@ ALL_METRICS = ["hrv", "rhr", "sleep", "cycle", "stress", "body_battery", "traini
 MINIMAL_METRICS = ["hrv", "rhr", "sleep", "cycle"]
 
 CALL_DELAY = float(os.environ.get("GARMIN_CALL_DELAY", "0.25"))
+DEFAULT_TOKENSTORE = Path(__file__).resolve().parents[1] / ".garmin_tokens"
 
 
 def _pace():
@@ -43,80 +45,45 @@ def fetch_menstrual_calendar(api, start_date, end_date):
 
 
 def build_calendar_days(calendar_entries):
+    """Build cycle booleans from the logged period truth plus Garmin's fertile guess.
+
+    Collection keeps only raw calendar facts:
+    - ``is_period``: logged period / bleeding days.
+    - ``garmin_predicted_fertile``: Garmin's fertile-window prediction.
+
+    Reproductive phase labels such as Early follicular / Late luteal are a
+    preprocessing choice, so ``cycle_phase`` is deliberately not filled here.
+    """
     calendar_days = {}
+    calendar_entries = sorted(calendar_entries, key=lambda e: e["startDate"])
 
-    complete_cycle_lengths = []
-    for i in range(len(calendar_entries) - 1):
-        s_i = datetime.fromisoformat(calendar_entries[i]["startDate"]).date()
-        s_next = datetime.fromisoformat(calendar_entries[i + 1]["startDate"]).date()
-        complete_cycle_lengths.append((s_next - s_i).days)
-    avg_cycle_len = round(sum(complete_cycle_lengths) / len(complete_cycle_lengths)) if complete_cycle_lengths else 28
+    def record(day):
+        return calendar_days.setdefault(day.isoformat(), {
+            "is_period": False,
+            "garmin_predicted_fertile": False,
+        })
 
-    for idx, entry in enumerate(calendar_entries):
+    for entry in calendar_entries:
         start = datetime.fromisoformat(entry["startDate"]).date()
         period_len = int(entry.get("periodLength", 1) or 1)
-
-        fertile_start = entry.get("fertileWindowStart", None)
+        fertile_start = entry.get("fertileWindowStart")
         fertile_len = int(entry.get("lengthOfFertileWindow", 0) or 0)
 
-        if idx + 1 < len(calendar_entries):
-            next_start = datetime.fromisoformat(calendar_entries[idx + 1]["startDate"]).date()
-        else:
-            next_start = start + timedelta(days=avg_cycle_len)
-
-        # 1) Menstrual
         for d in range(period_len):
-            day = start + timedelta(days=d)
-            calendar_days[day.isoformat()] = "Menstrual"
+            record(start + timedelta(days=d))["is_period"] = True
 
-        # Fertile window
-        if fertile_start is not None and fertile_len > 0:
-            fertile_window_start = start + timedelta(days=int(fertile_start))
-            fertile_window_end = fertile_window_start + timedelta(days=fertile_len - 1)
-        else:
-            cycle_len = (next_start - start).days
-            fertile_len = 7
-            mid = start + timedelta(days=cycle_len // 2)
-            fertile_window_start = mid - timedelta(days=fertile_len // 2)
-            fertile_window_end = fertile_window_start + timedelta(days=fertile_len - 1)
-            min_start = start + timedelta(days=period_len)
-            max_end = next_start - timedelta(days=1)
-            if fertile_window_start < min_start:
-                fertile_window_start = min_start
-                fertile_window_end = fertile_window_start + timedelta(days=fertile_len - 1)
-            if fertile_window_end > max_end:
-                fertile_window_end = max_end
-                fertile_window_start = fertile_window_end - timedelta(days=fertile_len - 1)
+        if fertile_start is None or fertile_len <= 0:
+            continue
 
-        # 2) Follicular: after period -> day before fertile window
-        fol_start = start + timedelta(days=period_len)
-        fol_end = fertile_window_start - timedelta(days=1)
-        day = fol_start
-        while day <= fol_end:
-            calendar_days[day.isoformat()] = "Follicular"
-            day += timedelta(days=1)
-
-        # 3) Fertile window split: first half Follicular, second half Luteal
-        fertile_days = [fertile_window_start + timedelta(days=i) for i in range(fertile_len)]
-        split = fertile_len // 2
-        for i, day in enumerate(fertile_days):
-            if calendar_days.get(day.isoformat()) != "Menstrual":
-                calendar_days[day.isoformat()] = "Follicular" if i < split else "Luteal"
-
-        # 4) Luteal: after fertile window -> day before next period
-        lut_start = fertile_window_end + timedelta(days=1)
-        lut_end = next_start - timedelta(days=1)
-        day = lut_start
-        while day <= lut_end:
-            if calendar_days.get(day.isoformat()) != "Menstrual":
-                calendar_days[day.isoformat()] = "Luteal"
-            day += timedelta(days=1)
+        fertile_window_start = start + timedelta(days=int(fertile_start))
+        for d in range(fertile_len):
+            record(fertile_window_start + timedelta(days=d))["garmin_predicted_fertile"] = True
 
     return calendar_days
 
 
-def login_with_retry(api, max_attempts=5, base_delay=15):
-    """Retry Garmin login when Garmin Connect temporarily rate-limits auth."""
+def login_with_retry(api, max_attempts=5, base_delay=15, tokenstore=None):
+    """Log in with cached tokens, retrying when Garmin rate-limits auth."""
     def is_rate_limit_error(exc):
         current = exc
         while current is not None:
@@ -126,9 +93,12 @@ def login_with_retry(api, max_attempts=5, base_delay=15):
             current = current.__cause__ or current.__context__
         return False
 
+    tokenstore = Path(os.environ.get("GARMINTOKENS", tokenstore or DEFAULT_TOKENSTORE))
+    tokenstore.mkdir(parents=True, exist_ok=True)
+
     for attempt in range(1, max_attempts + 1):
         try:
-            api.login()
+            api.login(tokenstore=str(tokenstore))
             return
         except Exception as exc:
             if not (isinstance(exc, GarminConnectTooManyRequestsError) or is_rate_limit_error(exc)):
@@ -218,8 +188,16 @@ def _fetch_sleep(api, date_list):
 def _fetch_cycle(api, date_list, start_date, today):
     calendar_entries = fetch_menstrual_calendar(api, start_date, today)
     calendar_days = build_calendar_days(calendar_entries)
-    return [{"date": d.isoformat(), "cycle_phase": calendar_days.get(d.isoformat(), "Not logged")}
-            for d in date_list]
+    return [
+        {
+            "date": d.isoformat(),
+            **calendar_days.get(d.isoformat(), {
+                "is_period": False,
+                "garmin_predicted_fertile": False,
+            }),
+        }
+        for d in date_list
+    ]
 
 
 def _fetch_stress(api, date_list):
@@ -310,7 +288,7 @@ def _fetch_training(api, date_list):
     return training_load_list, training_status_list
 
 
-def download_dataframe(api, days_back, status=lambda m: None, metrics=None):
+def download_dataframe(api, days_back, status=lambda m: None, metrics=None, progress=None):
     """Download the selected metrics and return the merged DataFrame.
 
     `metrics` selects which metrics to pull (default MINIMAL_METRICS; pass
@@ -321,36 +299,43 @@ def download_dataframe(api, days_back, status=lambda m: None, metrics=None):
     start_date = today - timedelta(days=days_back)
     date_list = [start_date + timedelta(days=i) for i in range(days_back + 1)]
 
+    def with_progress(items, label):
+        if progress is None:
+            return items
+        return progress(items, label)
+
     # name -> DataFrame for whatever was fetched (merged in dict-insertion order)
     dfs = {}
 
     if "hrv" in metrics:
         status("Downloading HRV…")
-        dfs["hrv"] = pd.DataFrame(_fetch_hrv(api, date_list))
+        dfs["hrv"] = pd.DataFrame(_fetch_hrv(api, with_progress(date_list, "HRV")))
 
     if "rhr" in metrics:
         status("Downloading resting heart rate…")
-        dfs["rhr"] = pd.DataFrame(_fetch_rhr(api, date_list))
+        dfs["rhr"] = pd.DataFrame(_fetch_rhr(api, with_progress(date_list, "Resting HR")))
 
     if "sleep" in metrics:
         status("Downloading sleep…")
-        dfs["sleep"] = pd.DataFrame(_fetch_sleep(api, date_list))
+        dfs["sleep"] = pd.DataFrame(_fetch_sleep(api, with_progress(date_list, "Sleep")))
 
     if "cycle" in metrics:
         status("Downloading menstrual cycle…")
-        dfs["cycle"] = pd.DataFrame(_fetch_cycle(api, date_list, start_date, today))
+        dfs["cycle"] = pd.DataFrame(_fetch_cycle(api, with_progress(date_list, "Cycle"), start_date, today))
 
     if "stress" in metrics:
         status("Downloading stress…")
-        dfs["stress"] = pd.DataFrame(_fetch_stress(api, date_list))
+        dfs["stress"] = pd.DataFrame(_fetch_stress(api, with_progress(date_list, "Stress")))
 
     if "body_battery" in metrics:
         status("Downloading body battery…")
-        dfs["body_battery"] = pd.DataFrame(_fetch_body_battery(api, date_list, start_date, today))
+        dfs["body_battery"] = pd.DataFrame(_fetch_body_battery(
+            api, with_progress(date_list, "Body battery"), start_date, today
+        ))
 
     if "training" in metrics:
         status("Downloading training status…")
-        load_list, status_list = _fetch_training(api, date_list)
+        load_list, status_list = _fetch_training(api, with_progress(date_list, "Training"))
         dfs["training_load"] = pd.DataFrame(load_list)
         dfs["training_status"] = pd.DataFrame(status_list)
 

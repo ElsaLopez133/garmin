@@ -1,8 +1,16 @@
 import pandas as pd
 import os
+import sys
+from pathlib import Path
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.patches import Patch
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from preprocessing.cycle_phases import derive_cycle_phases
 
 
 # Load your data
@@ -27,6 +35,8 @@ print(f"\n📂 Data will be saved in: {OUTPUT_DIR}\n")
 # Convert date column to datetime
 df["date"] = pd.to_datetime(df["date"])
 df = df.sort_values("date")
+if "is_period" in df.columns or "cycle_phase" in df.columns:
+    df = derive_cycle_phases(df)
 
 
 # ---- HRV ----
@@ -172,17 +182,17 @@ plt.title("HRV, RHR & Menstrual Cycle Phases")
 
 # ---- Cycle phase coloring ----
 phase_colors = {
-    "Fertile": "green",
-    "Menstrual": "red",
-    "Luteal": "pink",
-    "Follicular": "yellow",
-    "Ovulation": "purple",
-    "Not logged": "white"
+    "Early follicular": "#4c72b0",
+    "Late luteal": "#dd8452",
+    "Not logged": "white",
 }
+period_color = "#c44e52"
 
 for i, row in df.iterrows():
     color = phase_colors.get(row["cycle_phase"], "white")
     plt.axvspan(row["date"], row["date"] + pd.Timedelta(days=1), color=color, alpha=0.4)
+    if row.get("is_period", False):
+        plt.axvspan(row["date"], row["date"] + pd.Timedelta(days=1), color=period_color, alpha=0.45)
 
 # ---- HRV baseline band ----
 plt.fill_between(df["date"],
@@ -203,6 +213,7 @@ plt.plot(df["date"], df["resting_hr"], color="red", marker="o", markersize=3, li
 
 # ---- Legend for phases ----
 phase_patches = [mpatches.Patch(color=c, label=p) for p, c in phase_colors.items()]
+phase_patches.append(mpatches.Patch(color=period_color, label="Period"))
 plt.legend(handles=[*plt.gca().get_legend_handles_labels()[0], *phase_patches],
            loc="upper left", fontsize=8)
 
@@ -270,7 +281,6 @@ plt.legend(handles=phase_patches + [chronic_line, acute_line])
 plt.grid(alpha=0.3)
 plt.tight_layout()
 plt.savefig(f"{OUTPUT_DIR}/acute_chronic_load_plot.jpg")
-
 
 
 

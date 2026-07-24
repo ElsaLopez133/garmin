@@ -1,8 +1,10 @@
 """
 Is ovulation detectable from RHR / HRV alone?
 
-For each cycle we take the estimated ovulation day (= first Luteal day, i.e. the
-Follicular->Luteal boundary), align every day relative to it (day 0 = ovulation),
+For each cycle we take the estimated ovulation day (= the last day of Garmin's
+predicted fertile window, i.e. the Follicular->Luteal boundary; the anchor phases
+in cycle_phase are period-relative windows, not the true boundary), align every
+day relative to it (day 0 = ovulation),
 and average RHR and HRV across all cycles at each relative day. If the curves
 visibly *step* at day 0, the transition is detectable; the script also quantifies
 the pre- vs post-ovulation difference with a paired test across cycles.
@@ -47,17 +49,22 @@ def load_csv():
 
 
 def find_cycles(df):
-    """Return list of (cycle_start, ovulation_date, next_start) for cycles with a Luteal phase."""
-    is_menstrual = df["cycle_phase"] == "Menstrual"
-    starts = list(df.loc[is_menstrual & ~is_menstrual.shift(1, fill_value=False), "date"])
+    """Return list of (cycle_start, ovulation_date, next_start) for cycles with a fertile window.
+
+    Ovulation is anchored to the last day of Garmin's predicted fertile window
+    (garmin_predicted_fertile), since the period-anchored cycle_phase labels do not
+    mark the true Follicular->Luteal boundary.
+    """
+    is_period = df["is_period"] if "is_period" in df.columns else df["cycle_phase"] == "Period"
+    starts = list(df.loc[is_period & ~is_period.shift(1, fill_value=False), "date"])
     cycles = []
     for i, start in enumerate(starts):
         next_start = starts[i + 1] if i + 1 < len(starts) else df["date"].max() + pd.Timedelta(days=1)
         block = df[(df["date"] >= start) & (df["date"] < next_start)]
-        luteal = block[block["cycle_phase"] == "Luteal"]
-        if luteal.empty:
-            continue  # no ovulation boundary in this cycle
-        ovulation = luteal["date"].min()
+        fertile = block[block["garmin_predicted_fertile"] == True]  # noqa: E712 (bool column)
+        if fertile.empty:
+            continue  # no ovulation anchor in this cycle
+        ovulation = fertile["date"].max()  # ovulation ~ last day of the fertile window
         cycles.append((start, ovulation, next_start))
     return cycles
 
@@ -102,12 +109,13 @@ def quantify(aligned, metric):
 
 def main():
     df, out_path, label = load_csv()
-    if "cycle_phase" not in df.columns:
-        sys.exit("❌ No 'cycle_phase' column.")
+    for col in ("cycle_phase", "garmin_predicted_fertile"):
+        if col not in df.columns:
+            sys.exit(f"❌ No '{col}' column.")
 
     cycles = find_cycles(df)
     print(f"\n========== Ovulation detectability: {label} ==========")
-    print(f"Usable cycles (with a Luteal phase): {len(cycles)}")
+    print(f"Usable cycles (with a fertile window): {len(cycles)}")
     if len(cycles) < 2:
         sys.exit("Not enough cycles to analyse.")
 

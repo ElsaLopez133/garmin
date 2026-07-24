@@ -14,18 +14,29 @@ you can eyeball whether the phases line up with the biometrics.
 
 import os
 import sys
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import pandas as pd
 
-# Same colors as garmin_plot.py
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from preprocessing.cycle_phases import derive_cycle_phases, DEFAULT_ANCHOR_DAYS
+
+# Length of the derived Early-follicular / Late-luteal anchor windows (tunable).
+ANCHOR_DAYS = DEFAULT_ANCHOR_DAYS
+
+# Colors for the phases written by preprocessing.cycle_phases; matches the
+# transition notebook's palette. "Not logged" days are left unshaded, and
+# period days are overlaid from the separate is_period boolean.
 PHASE_COLORS = {
-    "Menstrual": "red",
-    "Follicular": "yellow",
-    "Fertile": "green",
-    "Luteal": "pink",
+    "Early follicular": "#4c72b0",
+    "Late luteal": "#dd8452",
 }
+PERIOD_COLOR = "#c44e52"
 
 
 def load_csv():
@@ -54,6 +65,10 @@ def load_csv():
     df = pd.read_csv(file_name)
     df["date"] = pd.to_datetime(df["date"])
     df = df.sort_values("date").reset_index(drop=True)
+    # Preprocessing: fetched CSVs carry raw calendar booleans, so build the
+    # Early-follicular / Late-luteal anchor windows here before checking them.
+    if "is_period" in df.columns or "cycle_phase" in df.columns:
+        df = derive_cycle_phases(df, anchor_days=ANCHOR_DAYS)
     os.makedirs(out_dir, exist_ok=True)
     return df, os.path.join(out_dir, f"cycle_check_{label}.jpg"), label
 
@@ -76,11 +91,11 @@ def text_summary(df, label):
         print("\n⚠️ No logged cycle phases at all — cycle data was NOT retrieved.")
         return
 
-    # Detect cycle starts = first day of each Menstrual run
-    is_menstrual = df["cycle_phase"] == "Menstrual"
-    starts = df.loc[is_menstrual & ~is_menstrual.shift(1, fill_value=False), "date"]
+    # Detect cycle starts = first day of each Period run.
+    is_period = df["is_period"] if "is_period" in df.columns else df["cycle_phase"] == "Period"
+    starts = df.loc[is_period & ~is_period.shift(1, fill_value=False), "date"]
     starts = list(starts)
-    print(f"\nDetected {len(starts)} cycle start(s) (first day of menstruation):")
+    print(f"\nDetected {len(starts)} cycle start(s) (first day of a period):")
     for i, s in enumerate(starts):
         if i + 1 < len(starts):
             length = (starts[i + 1] - s).days
@@ -99,7 +114,7 @@ def text_summary(df, label):
     # Per-phase mean biometrics — a quick physiological sanity check
     cols = [c for c in ["resting_hr", "hrv_rmssd", "avgStressLevel", "total_sleep_hr"] if c in df.columns]
     if cols:
-        print("\nMean biometrics per phase (expect RHR slightly higher in Luteal):")
+        print("\nMean biometrics per phase (expect RHR slightly higher in Late luteal):")
         means = logged.groupby("cycle_phase")[cols].mean().round(2)
         print(means.to_string())
     print("=" * (len(label) + 28))
@@ -116,6 +131,9 @@ def plot(df, out_path, label):
             color = PHASE_COLORS.get(row["cycle_phase"])
             if color:
                 ax1.axvspan(row["date"], row["date"] + pd.Timedelta(days=1), color=color, alpha=0.35)
+            if row.get("is_period", False):
+                ax1.axvspan(row["date"], row["date"] + pd.Timedelta(days=1),
+                            color=PERIOD_COLOR, alpha=0.45)
 
     # RHR on left axis
     if "resting_hr" in df.columns:
@@ -133,6 +151,7 @@ def plot(df, out_path, label):
 
     # Legend: phases + lines
     handles = [mpatches.Patch(color=c, alpha=0.35, label=p) for p, c in PHASE_COLORS.items()]
+    handles.append(mpatches.Patch(color=PERIOD_COLOR, alpha=0.45, label="Period"))
     lines, labels = ax1.get_legend_handles_labels()
     handles += lines
     ax1.legend(handles=handles, loc="upper left", ncol=3, fontsize=8)
