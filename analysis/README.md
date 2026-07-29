@@ -4,7 +4,9 @@ Companion doc for [`cycle_transition_model.ipynb`](./cycle_transition_model.ipyn
 
 This describes the approach for reconstructing menstrual cycle phases from Garmin
 biometrics, with the primary goal of **locating the follicular→luteal transition
-(ovulation)**. It is intentionally built step by step; the notebook currently
+(wearable luteal onset)**. External hormone validation suggests this wearable
+transition can occur a few days after the LH peak, so it should not be named exact
+ovulation unless an explicit lag correction is applied. The notebook currently
 implements Steps 0–4.
 
 ---
@@ -12,7 +14,7 @@ implements Steps 0–4.
 ## 1. The problem, and the one constraint that shapes everything
 
 We want to know, for any day, which cycle phase it belongs to — and above all,
-**where the follicular phase ends and the luteal phase begins** (i.e. ovulation).
+**where the wearable signals switch from follicular-like to luteal-like**.
 
 The constraint: **the only real ground truth we have is period timing.** It is
 self-logged and reliable. Everything anchored to it is trustworthy; everything
@@ -48,11 +50,11 @@ So the task is **not** "classify a day into a bucket." It is:
 
 The transition is a **latent variable we infer**, not a label we need.
 
-**Why this is physiologically sound.** The follicular→luteal transition is a real
-*step change*, not a gradual drift. After ovulation the corpus luteum raises
+**Why this is physiologically sound.** The wearable follicular→luteal transition is
+a real *step change*, not a gradual drift. After ovulation the corpus luteum raises
 progesterone, which persistently lifts **resting heart rate**, **respiration
 rate**, and **body temperature**, and tends to **lower HRV**. So the model is
-detecting a level shift — and indeed the existing `Pipeline-model.ipynb` already
+detecting the downstream biometric level shift — and indeed the existing `Pipeline-model.ipynb` already
 found `resting_hr_slope14`, `avg_sleep_respiration_slope*`, and
 `hrv_rmssd_slope14` to be its most important features. We're formalizing what the
 data was already telling us.
@@ -74,7 +76,7 @@ data was already telling us.
 Before modeling, verify the step is real. Align every cycle by cycle-day and plot
 mean RHR / respiration / HRV:
 
-1. **Forward** (days since period start) — ovulation timing varies, so the step is
+1. **Forward** (days since period start) — transition timing varies, so the step is
    smeared but should still be visible.
 2. **Backward** (days before next period) — since luteal length is stable, the step
    should be **sharper** here.
@@ -147,7 +149,7 @@ the honest signal; thresholding at 0.5 gives hard labels for the report/confusio
 - **Classification report** (precision/recall/F1) describes behavior at the single 0.5 threshold;
   it can disagree with AUC if 0.5 is a poorly placed cutoff.
 - **Confusion matrix** shows *error direction* — e.g. follicular days mislabeled luteal would
-  drag Step 3's estimated ovulation earlier.
+  drag Step 3's estimated transition earlier.
 
 **Honest caveat:** `C` is chosen using folds from all cycles and then evaluated with the same
 leave-one-cycle-out scheme, so the OOF AUC is a *mild* over-estimate. A fully rigorous version
@@ -202,14 +204,21 @@ Run on 26 complete cycles:
 - **24 / 26** estimates were model-supported change-points or crossings; **2 / 26**
   used the low-confidence constrained-midpoint fallback.
 - Luteal length (`next period start − estimated transition`) clustered around
-  **median 15 days** (mean 14.27, SD 3.58, range 8–20).
-- **15 / 26** estimates landed inside the 10–16 day review band: both low-confidence
-  fallbacks were inside the band, while the model-supported estimates split 13 ok /
-  11 review. This is useful but still weak validation, so Step 3 should be treated as
+  **median 11 days** (mean 11.85, SD 2.68, range 8–17) after the current physiological
+  search constraints.
+- **19 / 26** estimates landed inside the 10–16 day review band: both low-confidence
+  fallbacks were inside the band, while the model-supported estimates split 17 ok /
+  7 review. This is useful but still weak validation, so Step 3 should be treated as
   a model-based candidate transition rather than final truth.
 - Garmin's fertile-window prediction remains only a weak comparator; the detected
   transitions generally fall near or just after that window, but it was not used as
   a label.
+
+**Interpretation:** this transition is the estimated **wearable luteal onset**. In
+mcPHASES external validation, a similar HSMM boundary aligned best with labelled luteal
+onset and trailed the LH peak by about **3.5 days**. If an approximate LH-peak
+ovulation proxy is needed, report `transition_day - 3.5`, but keep it separate from
+the primary transition estimate.
 
 ### Step 4 — Direct change-point on AUC-selected engineered features
 
@@ -241,16 +250,18 @@ more plausible.
 
 #### Step 4 findings
 
-Implemented in the notebook, but the full notebook has not yet been re-executed after
-the latest Step 4 rewrite. Findings should be filled from the Step 4 output tables
-after running:
+Current run:
 
-- top standalone engineered features by leave-one-cycle-out AUC,
-- selected Step 4 features and weights,
-- feature-step transition dates,
-- luteal-length validation,
-- agreement with Step 3 `P(luteal)` transitions,
-- comparison with Garmin's fertile-window end.
+- Top selected feature families were `resting_hr_diff7`, `avg_sleep_stress_roll3`,
+  `avgStressLevel_roll7`, and `hrv_rmssd_bn`.
+- Feature-step transitions were estimated for **26 / 26** cycles.
+- **19 / 26** were feature-step-supported; **7 / 26** used the constrained midpoint
+  fallback.
+- Luteal length clustered around **median 11.5 days** (mean 11.88, SD 2.18,
+  range 8–17).
+- **22 / 26** estimates landed inside the 10–16 day review band.
+- Compared with Garmin's fertile-window proxy (`fertile-window end - 2`), median
+  offset was **-0.5 days**, with **20 / 26** estimates within ±2 days.
 
 ### Step 5 — Reconstruct full phases
 
@@ -263,12 +274,13 @@ prediction needed:
 
 ## 5. Validation without transition ground truth
 
-We can't directly check ovulation timing, but we have a strong biological prior:
-**luteal phase length is stable (~12–14 days), while follicular length varies.** So:
+In the Garmin-only record we can't directly check LH-peak ovulation timing, but we
+have a strong biological prior: **luteal phase length is stable (~12–14 days), while
+follicular length varies.** So:
 
 - Check that `next period start − estimated transition` **clusters tightly** around
-  ~12–14 days across the 27 cycles. Tight clustering is real evidence the crossing
-  lands on true ovulation.
+  ~12–14 days across the 27 cycles. Tight clustering is evidence that the crossing
+  lands near the biological luteal transition, not proof of exact LH-peak ovulation.
 - **Flag** cycles where it falls outside ~10–16 days as likely errors.
 - Use `garmin_predicted_fertile` only as a **weak comparator** — agreement is
   reassuring, disagreement proves nothing either way.
@@ -286,8 +298,9 @@ We can't directly check ovulation timing, but we have a strong biological prior:
 
 ## 7. Honest caveats
 
-- **~27 cycles / ~27 ovulation events** is a small sample for a noisy step. Realistic
-  target: locate the transition **to within a few days**, not exactly.
+- **~27 cycles / ~27 transitions** is a small sample for a noisy step. Realistic
+  target: locate wearable luteal onset **to within a few days**, not exact LH-peak
+  ovulation.
 - Labels are fixed windows around menses, so the endpoints themselves carry some
   slop; the method tolerates this but can't beat it entirely.
 
@@ -296,6 +309,6 @@ We can't directly check ovulation timing, but we have a strong biological prior:
 - [x] **Step 0** — cycle segmentation + alignment plots (signal check). *Step confirmed a visible luteal step.*
 - [x] **Step 1** — binary follicular-vs-luteal classifier (per-cycle baseline normalization, elastic-net regularization, leave-one-cycle-out CV). *OOF AUC ≈ 0.85 after correcting follicular anchors to include period days.*
 - [x] **Step 2** — score `P(luteal)` across the full calendar (honest leave-one-cycle-out per day, including `Not logged`).
-- [x] **Step 3** — per-cycle transition location + validation against the luteal-length prior. *26 / 26 cycles estimated; 15 / 26 within the 10–16 day review band; 24 model-supported estimates.*
-- [x] **Step 4** — direct two-level change-point on AUC-selected engineered features. *Implemented; findings pending notebook re-run.*
+- [x] **Step 3** — per-cycle transition location + validation against the luteal-length prior. *26 / 26 cycles estimated; 19 / 26 within the 10–16 day review band; 24 model-supported estimates.*
+- [x] **Step 4** — direct two-level change-point on AUC-selected engineered features. *26 / 26 cycles estimated; 22 / 26 inside the 10–16 day review band.*
 - [ ] **Step 5** — full-phase reconstruction and per-cycle transition plots.
