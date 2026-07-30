@@ -4,7 +4,7 @@ Combine downloaded participant CSVs into one dataset + a per-participant QC tabl
 Reads every CSV in a folder (default data/participants/, as produced by
 collector/fetch_uploads.py), stacks them, prints a triage table, and writes:
   data/combined/all_participants.csv      - everything stacked
-  data/combined/ovulation_eligible.csv    - only participants usable for ovulation work
+  data/combined/ovulation_eligible.csv    - participants usable for transition/ovulation work
   data/combined/participant_summary.csv   - the QC table
 
 Run:
@@ -21,7 +21,8 @@ import pandas as pd
 IN_DIR = sys.argv[1] if len(sys.argv) > 1 else "data/participants"
 OUT_DIR = "data/combined"
 
-# Contraception answers that suppress ovulation -> exclude from ovulation analysis.
+# Contraception answers that can suppress ovulation -> exclude from transition
+# validation that assumes an ovulatory cycle.
 HORMONAL = {"Hormonal pill", "Hormonal IUD", "Implant / injection / ring"}
 
 

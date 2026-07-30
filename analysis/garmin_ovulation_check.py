@@ -1,13 +1,14 @@
 """
-Is ovulation detectable from RHR / HRV alone?
+Quick check: do wearable signals step around Garmin's fertile-window proxy?
 
-For each cycle we take the estimated ovulation day (= the last day of Garmin's
-predicted fertile window, i.e. the Follicular->Luteal boundary; the anchor phases
-in cycle_phase are period-relative windows, not the true boundary), align every
-day relative to it (day 0 = ovulation),
-and average RHR and HRV across all cycles at each relative day. If the curves
-visibly *step* at day 0, the transition is detectable; the script also quantifies
-the pre- vs post-ovulation difference with a paired test across cycles.
+For each cycle we take Garmin's algorithmic fertile-window endpoint as a weak
+proxy for the follicular->luteal transition. This is not hormonal ground truth:
+the project target is wearable luteal onset, which external validation suggests
+can lag the LH peak by a few days.
+
+The script aligns days relative to that proxy, averages RHR and HRV across cycles,
+and checks whether the curves visibly step from follicular-like to luteal-like.
+It is a signal sanity check, not a final ovulation detector.
 
 Run:
   python garmin_ovulation_check.py [path/to/csv]
@@ -49,11 +50,11 @@ def load_csv():
 
 
 def find_cycles(df):
-    """Return list of (cycle_start, ovulation_date, next_start) for cycles with a fertile window.
+    """Return (cycle_start, transition_proxy_date, next_start) for cycles with a fertile window.
 
-    Ovulation is anchored to the last day of Garmin's predicted fertile window
-    (garmin_predicted_fertile), since the period-anchored cycle_phase labels do not
-    mark the true Follicular->Luteal boundary.
+    The proxy is anchored to the last day of Garmin's predicted fertile window
+    (garmin_predicted_fertile). It is useful for visual alignment, but it is still
+    Garmin's calendar algorithm and must not be treated as true LH-peak ovulation.
     """
     is_period = df["is_period"] if "is_period" in df.columns else df["cycle_phase"] == "Period"
     starts = list(df.loc[is_period & ~is_period.shift(1, fill_value=False), "date"])
@@ -64,8 +65,8 @@ def find_cycles(df):
         fertile = block[block["garmin_predicted_fertile"] == True]  # noqa: E712 (bool column)
         if fertile.empty:
             continue  # no ovulation anchor in this cycle
-        ovulation = fertile["date"].max()  # ovulation ~ last day of the fertile window
-        cycles.append((start, ovulation, next_start))
+        transition_proxy = fertile["date"].max()
+        cycles.append((start, transition_proxy, next_start))
     return cycles
 
 
@@ -114,7 +115,7 @@ def main():
             sys.exit(f"❌ No '{col}' column.")
 
     cycles = find_cycles(df)
-    print(f"\n========== Ovulation detectability: {label} ==========")
+    print(f"\n========== Follicular->luteal signal check: {label} ==========")
     print(f"Usable cycles (with a fertile window): {len(cycles)}")
     if len(cycles) < 2:
         sys.exit("Not enough cycles to analyse.")
@@ -128,7 +129,8 @@ def main():
         sem = grp.sem()
         ax.axvspan(-WINDOW, 0, color="yellow", alpha=0.15, label="Follicular side")
         ax.axvspan(0, WINDOW, color="pink", alpha=0.25, label="Luteal side")
-        ax.axvline(0, color="green", linestyle="--", linewidth=1.5, label="Estimated ovulation")
+        ax.axvline(0, color="green", linestyle="--", linewidth=1.5,
+                   label="Garmin transition proxy")
         ax.plot(mean.index, mean.values, color="black", marker="o", markersize=3)
         ax.fill_between(mean.index, mean - sem, mean + sem, color="gray", alpha=0.3)
         ax.set_ylabel(ylabel)
@@ -141,17 +143,17 @@ def main():
                    f"(Δ{res['delta']:+.2f}, d={res['cohens_d']:.2f}, p={p}, n={res['n_cycles']})")
             ax.set_title(txt, fontsize=10)
             print(f"\n{metric}:")
-            print(f"  pre-ovulation  mean ({PRE[0]}..{PRE[1]} d): {res['pre_mean']:.2f}")
-            print(f"  post-ovulation mean ({POST[0]}..{POST[1]} d): {res['post_mean']:.2f}")
+            print(f"  pre-proxy  mean ({PRE[0]}..{PRE[1]} d): {res['pre_mean']:.2f}")
+            print(f"  post-proxy mean ({POST[0]}..{POST[1]} d): {res['post_mean']:.2f}")
             print(f"  step Δ = {res['delta']:+.2f}   Cohen's d = {res['cohens_d']:.2f}   p = {p}   ({res['n_cycles']} cycles)")
 
-    axes[-1].set_xlabel("Days relative to estimated ovulation (0 = Follicular→Luteal boundary)")
+    axes[-1].set_xlabel("Days relative to Garmin transition proxy")
     axes[0].legend(loc="upper left", fontsize=8)
     plt.tight_layout()
     plt.savefig(out_path, dpi=120)
     print(f"\n💾 Saved plot to {out_path}")
     print("\nInterpretation: a clear step at day 0 (RHR up, HRV down) with |d|>0.5 and small p")
-    print("means the Follicular→Luteal transition is detectable from these signals alone.")
+    print("suggests the wearable Follicular→Luteal transition is visible in these signals.")
 
 
 if __name__ == "__main__":

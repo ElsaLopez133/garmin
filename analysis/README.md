@@ -1,4 +1,4 @@
-# Cycle phase & follicular→luteal transition — modeling plan
+# Wearable follicular→luteal transition — modeling plan
 
 Companion doc for [`cycle_transition_model.ipynb`](./cycle_transition_model.ipynb).
 
@@ -8,6 +8,19 @@ biometrics, with the primary goal of **locating the follicular→luteal transiti
 transition can occur a few days after the LH peak, so it should not be named exact
 ovulation unless an explicit lag correction is applied. The notebook currently
 implements Steps 0–4.
+
+**Product framing:** this is a wearable-based menstrual-cycle model for femtech
+and cycle-aware sports analytics. Its core output is a dated, uncertain estimate
+of the biometric shift from follicular-like to luteal-like physiology. That output
+can contextualize recovery, readiness, sleep, HRV, and symptom patterns; it is not
+medical diagnosis and should not be presented as a definitive ovulation test.
+
+**Retrospective vs live use:** the current Garmin notebooks are retrospective.
+They see the whole completed cycle, including the next period, and can therefore
+use luteal length as a validation/regularization constraint. A live product would
+need an online/filtering version that updates `P(transition has happened by today)`
+as new days arrive, then revises confidence once the next period confirms the
+cycle length.
 
 ---
 
@@ -283,7 +296,8 @@ follicular length varies.** So:
   lands near the biological luteal transition, not proof of exact LH-peak ovulation.
 - **Flag** cycles where it falls outside ~10–16 days as likely errors.
 - Use `garmin_predicted_fertile` only as a **weak comparator** — agreement is
-  reassuring, disagreement proves nothing either way.
+  reassuring, disagreement proves nothing either way. It is Garmin's algorithmic
+  calendar estimate, not hormonal ground truth.
 
 ## 6. Refinements that matter
 
@@ -303,6 +317,9 @@ follicular length varies.** So:
   ovulation.
 - Labels are fixed windows around menses, so the endpoints themselves carry some
   slop; the method tolerates this but can't beat it entirely.
+- The retrospective boundary search cannot be deployed unchanged in real time,
+  because live scoring does not yet know the next period date or final luteal
+  length. Use an online posterior/confidence curve for live applications.
 
 ## 8. Status / roadmap
 
