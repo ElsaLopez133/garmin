@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HSMM Filter — the maths behind cycle_transition_live</title>
+<script>
+  MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['$$', '$$']] } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
+<style>
+  :root {
+    --fg: #1a1a1a; --bg: #ffffff; --muted: #5a5a5a; --rule: #e2e2e2;
+    --accent: #2f6f4f; --accent2: #34518a; --code-bg: #f5f6f8; --warn: #b4472e;
+    --box: #f3f7f4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fg: #e6e6e6; --bg: #16181c; --muted: #9aa3ad; --rule: #2c313a;
+      --accent: #6bbf93; --accent2: #7ea2e0; --code-bg: #21252c; --warn: #e08a72;
+      --box: #1b2620;
+    }
+  }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: var(--fg); background: var(--bg); line-height: 1.62;
+    max-width: 820px; margin: 0 auto; padding: 2.2rem 1.3rem 5rem;
+    font-size: 17px;
+  }
+  h1 { font-size: 1.85rem; line-height: 1.2; margin: 0 0 .3rem; }
+  h2 { font-size: 1.35rem; margin: 2.6rem 0 .6rem; padding-top: .6rem;
+       border-top: 1px solid var(--rule); color: var(--accent); }
+  h3 { font-size: 1.08rem; margin: 1.6rem 0 .4rem; }
+  .sub { color: var(--muted); font-size: .98rem; margin: 0 0 1.4rem; }
+  p { margin: .7rem 0; }
+  code { background: var(--code-bg); padding: .1em .38em; border-radius: 4px;
+         font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; font-size: .88em; }
+  pre { background: var(--code-bg); padding: .9rem 1rem; border-radius: 8px;
+        overflow-x: auto; font-size: .85em; line-height: 1.5;
+        border: 1px solid var(--rule); }
+  pre code { background: none; padding: 0; }
+  .box { background: var(--box); border: 1px solid var(--rule); border-left: 3px solid var(--accent);
+         border-radius: 8px; padding: .3rem 1.1rem; margin: 1.2rem 0; }
+  .key { border-left-color: var(--accent2); }
+  .warn { border-left-color: var(--warn); }
+  table { border-collapse: collapse; width: 100%; margin: 1.1rem 0; font-size: .92rem; }
+  th, td { border: 1px solid var(--rule); padding: .42rem .6rem; text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  th { background: var(--code-bg); font-weight: 600; }
+  caption { caption-side: bottom; color: var(--muted); font-size: .86rem; margin-top: .5rem; text-align: left; }
+  .muted { color: var(--muted); }
+  ul, ol { padding-left: 1.3rem; }
+  li { margin: .3rem 0; }
+  .tag { display: inline-block; font-size: .72rem; letter-spacing: .04em; text-transform: uppercase;
+         color: var(--accent2); border: 1px solid var(--accent2); border-radius: 4px;
+         padding: .05rem .4rem; vertical-align: middle; }
+  .footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule);
+            color: var(--muted); font-size: .85rem; }
+</style>
+</head>
+<body>
+
+<h1>The HSMM filter — the maths, from the ground up</h1>
+<p class="sub">A companion to <code>analysis/cycle_transition_live.ipynb</code> · the forward-filtered
+detector (<code>hsmm_filter</code> / <code>hsmm_fire</code>) explained before the code.</p>
+
+<div class="box key">
+<p><strong>What we are building.</strong> Standing on day \(t\) of an in-progress cycle, with data only
+up to today, we want the probability that the follicular&rarr;luteal transition (ovulation) has already
+happened:</p>
+$$\pi_t \;\equiv\; P\big(\text{state}_t = \text{Luteal} \;\big|\; y_{1:t}\big).$$
+<p>This document derives every term of the recursion that computes \(\pi_t\). We build the pieces in
+order: <strong>(1)</strong> the generative model, <strong>(2)</strong> the duration distribution and
+the <strong>hazard \(h(t)\)</strong> — the part most worth understanding — <strong>(3)</strong> the
+emissions, and only then <strong>(4)</strong> the Bayesian filter that ties them together.</p>
+</div>
+
+<h2>1. The generative model</h2>
+
+<p>We assume the hidden daily state \(x_t\in\{F,L\}\) (Follicular, Luteal) is generated like this:</p>
+
+<h3>Transitions — a one-way switch</h3>
+<p>A cycle begins in \(F\) and switches to \(L\) exactly once (ovulation happens once per cycle).
+Once luteal, it stays luteal — we say \(L\) is <em>absorbing</em>:</p>
+$$
+P(x_t = L \mid x_{t-1} = L) = 1,\qquad
+P(x_t = L \mid x_{t-1} = F) = h(t).
+$$
+<p>The number \(h(t)\) is the <strong>hazard</strong>: the chance of switching <em>on day \(t\)</em>,
+<em>given we have not switched yet</em>. Crucially it depends on \(t\) — it is large near the expected
+ovulation day and small far from it. That time-dependence is the whole point (see §2).</p>
+
+<div class="box">
+<p><span class="tag">why "semi-Markov"</span> A plain HMM uses a <em>constant</em> switch probability
+\(h(t)=h\). Then the time spent in \(F\) is geometrically distributed, whose most likely value is
+<em>zero</em> — it cannot say &ldquo;ovulation is usually around day&nbsp;15.&rdquo; Letting the hazard
+vary with \(t\) (equivalently, putting a proper distribution on the <em>duration</em> in \(F\)) is
+exactly what upgrades an HMM to a <strong>hidden semi-Markov model (HSMM)</strong>.</p>
+</div>
+
+<h3>Emissions — what a day looks like</h3>
+<p>Each day's biometric vector \(y_t\) (here the 4 standardized signals: resting HR, HRV, sleep
+respiration, sleep stress) is drawn from a state-specific multivariate Gaussian:</p>
+$$
+y_t \mid F \sim \mathcal N(\mu_F,\Sigma_F),\qquad
+y_t \mid L \sim \mathcal N(\mu_L,\Sigma_L).
+$$
+<p>These two Gaussians are fit from <em>prior</em> completed cycles (details in §3).</p>
+
+<h2>2. Duration, survival, and the hazard \(h(t)\) <span class="muted" style="font-size:.8em">— the key idea</span></h2>
+
+<p>Everything hinges on \(h(t)\), so we build it slowly. Start from a question you <em>can</em> answer
+from past cycles: <em>on which cycle-day does this person usually transition?</em></p>
+
+<h3>2.1 The duration distribution</h3>
+<p>Let \(T\) be the (unknown) transition day of the current cycle. From prior cycles' known transition
+days we model it as Gaussian:</p>
+$$
+T \sim \mathcal N(\mu_T,\ \sigma_T^2),
+\qquad \mu_T = \texttt{hz\_mu},\ \ \sigma_T = \texttt{hz\_sd}.
+$$
+<p>In the code, <code>hz_mu = median(prior transition days)</code> and
+<code>hz_sd = std(prior transition days)</code> (with sensible fallbacks 15.0 / 2.5 before enough
+history exists). So the model literally learns &ldquo;you ovulate around day \(\mu_T\), give or take
+\(\sigma_T\).&rdquo;</p>
+
+<p>Two functions derived from \(T\):</p>
+<ul>
+<li>the <strong>density</strong> \(f(t) = P(T = t)\) — how likely the switch lands exactly on day \(t\);</li>
+<li>the <strong>survival function</strong> \(S(t) = P(T \ge t)\) — the chance the switch has
+<em>not</em> happened by the start of day \(t\).</li>
+</ul>
+
+<h3>2.2 The definition of a hazard</h3>
+<p>The hazard is a <em>conditional</em> rate — density among the survivors:</p>
+$$
+\boxed{\,h(t) \;=\; \frac{P(T = t)}{P(T \ge t)} \;=\; \frac{f(t)}{S(t)}\,}
+$$
+<p>Read it as: <em>&ldquo;of the cycles that have made it to day \(t\) still follicular, what fraction
+transition today?&rdquo;</em> This is the standard hazard from survival analysis (the same object as a
+failure rate in reliability, or a mortality rate in actuarial tables). It is <strong>not</strong> the
+same as \(f(t)\): \(f(t)\) is unconditional (&ldquo;out of all cycles&rdquo;), \(h(t)\) conditions on
+having survived — which is exactly the information the filter has each day (it knows it hasn't fired
+yet).</p>
+
+<h3>2.3 Discretizing the Gaussian</h3>
+<p>Days are integers, so we integrate the Gaussian density over a \(\pm\tfrac12\)-day band around \(t\)
+using the normal CDF \(\Phi\). Writing \(z_\pm = \dfrac{t \pm 0.5 - \mu_T}{\sigma_T}\):</p>
+$$
+S(t) = P(T \ge t) = 1 - \Phi\!\Big(\tfrac{t-0.5-\mu_T}{\sigma_T}\Big),
+\qquad
+f(t) = \Phi\!\Big(\tfrac{t+0.5-\mu_T}{\sigma_T}\Big) - \Phi\!\Big(\tfrac{t-0.5-\mu_T}{\sigma_T}\Big).
+$$
+<p>These are exactly the two code lines:</p>
+<pre><code>surv = 1.0 - Phi((cd[t] - 0.5 - hz_mu) / hz_sd)                     #  S(t)
+inc  = Phi((cd[t] + 0.5 - hz_mu) / hz_sd) - Phi((cd[t] - 0.5 - hz_mu) / hz_sd)   #  f(t)
+h    = min(0.99, max(0.0, inc / max(surv, 1e-6)))                   #  h(t) = f(t)/S(t)</code></pre>
+<p>where <code>Phi = lambda x: 0.5*(1 + erf(x/sqrt(2)))</code> is the standard-normal CDF. The
+<code>max(surv, 1e-6)</code> avoids dividing by zero deep in the tail, and <code>min(0.99, max(0.0, .))</code>
+clips \(h\) to a valid probability.</p>
+
+<h3>2.4 A worked example</h3>
+<p>Take \(\mu_T = 15\), \(\sigma_T = 2.5\). Computing the three quantities day by day:</p>
+
+<table>
+<caption>Table 1 — hazard build-up for \(\mathcal N(15, 2.5^2)\). Note \(f(t)\) peaks at the mean
+(day 15) but \(h(t)\) keeps <em>rising</em> past it: fewer and fewer cycles remain unswitched, so each
+day's switches are a larger share of the survivors.</caption>
+<thead>
+<tr><th>day \(t\)</th><th>\(S(t)\) survival</th><th>\(f(t)\) density</th><th>\(h(t)=f/S\)</th></tr>
+</thead>
+<tbody>
+<tr><td>12</td><td>0.919</td><td>0.078</td><td>0.085</td></tr>
+<tr><td>13</td><td>0.841</td><td>0.116</td><td>0.137</td></tr>
+<tr><td>14</td><td>0.726</td><td>0.146</td><td>0.202</td></tr>
+<tr><td>15</td><td>0.579</td><td>0.159</td><td>0.274</td></tr>
+<tr><td>16</td><td>0.421</td><td>0.146</td><td>0.348</td></tr>
+<tr><td>17</td><td>0.274</td><td>0.116</td><td>0.422</td></tr>
+<tr><td>18</td><td>0.159</td><td>0.078</td><td>0.491</td></tr>
+</tbody>
+</table>
+
+<div class="box key">
+<p><strong>The intuition to keep.</strong> \(h(t)\) is a <em>time-varying prior pressure toward luteal</em>.
+Before the biometrics say anything, the filter already nudges its belief upward as \(t\) approaches
+\(\mu_T\) — and keeps nudging harder afterward. This is why the HSMM misses fewer cycles and jumps
+early less often than the CUSUM, which has no sense of &ldquo;where in the cycle we are.&rdquo;</p>
+</div>
+
+<h2>3. The emissions — scoring today's biometrics</h2>
+
+<p>The two state Gaussians are fit from <strong>prior completed cycles only</strong> (the causal
+contract — no peeking at the current or future cycles):</p>
+<pre><code>X, y  = anchors(prior, scale)      # labelled follicular (y=0) / luteal (y=1) day-vectors
+muF, SF = _mvn(X[y == 0])          # 𝒩(μ_F, Σ_F)
+muL, SL = _mvn(X[y == 1])          # 𝒩(μ_L, Σ_L)</code></pre>
+
+<p>For the current cycle, each day's standardized vector \(y_t\) is scored under both Gaussians, in
+<em>log</em> space for stability:</p>
+$$
+\ell^F_t = \log \mathcal N(y_t\mid\mu_F,\Sigma_F),\qquad
+\ell^L_t = \log \mathcal N(y_t\mid\mu_L,\Sigma_L),
+$$
+<pre><code>lF = _logmvn(z, muF, SF)     # log P(y_t | Follicular)
+lL = _logmvn(z, muL, SL)     # log P(y_t | Luteal)</code></pre>
+<p>where <code>_logmvn</code> is the Cholesky-based multivariate-normal log-density (log-determinant via
+\(2\sum\log\operatorname{diag}L\); Mahalanobis term via a triangular solve, no explicit inverse).</p>
+
+<h2>4. The Bayesian filter — predict then update</h2>
+
+<p>Now assemble §1–§3 into the recursion. We track \(\pi_t = P(x_t = L\mid y_{1:t})\) (the code's
+<code>piL</code>), starting at \(\pi_0 = 0\) (every cycle begins follicular). Each day does the two
+canonical moves of <em>every</em> Bayes filter — Kalman, HMM forward, particle — namely
+<strong>predict</strong> then <strong>update</strong>.</p>
+
+<h3>4.1 Predict — push the belief through the transition model</h3>
+<p>Before seeing \(y_t\), what is \(P(x_t = L\mid y_{1:t-1})\)? You are luteal today if you were
+already luteal (probability \(\pi_{t-1}\), and \(L\) is absorbing so you stay), <em>or</em> you were
+follicular (\(1-\pi_{t-1}\)) and jump now (hazard \(h(t)\)):</p>
+$$
+\tilde\pi_t \;=\; \underbrace{\pi_{t-1}\cdot 1}_{\text{already }L}\;+\;\underbrace{(1-\pi_{t-1})\,h(t)}_{\text{was }F,\text{ jumps today}}.
+$$
+<pre><code>predL = piL + (1.0 - piL) * h      # P(Luteal today  | data &lt; t)
+predF = (1.0 - piL) * (1.0 - h)    # P(Follicular today | data &lt; t)</code></pre>
+<p>The absence of an \(L\to F\) term is precisely the <em>absorbing</em> assumption; that is what makes
+the predict step this short.</p>
+
+<h3>4.2 Update — fold in today's observation (Bayes' rule)</h3>
+<p>Now condition on \(y_t\). Bayes' rule, \(P(x\mid y)\propto P(x)\,P(y\mid x)\), with the predicted
+probabilities as the prior and the emissions as the likelihood:</p>
+$$
+\pi_t \;=\; \frac{\tilde\pi_t\,\mathcal N(y_t\mid L)}
+{\tilde\pi_t\,\mathcal N(y_t\mid L) + (1-\tilde\pi_t)\,\mathcal N(y_t\mid F)}.
+$$
+<p>Define the unnormalized <em>forward variables</em> \(\alpha^L_t = \tilde\pi_t\,\mathcal N(y_t\mid L)\)
+and \(\alpha^F_t = (1-\tilde\pi_t)\,\mathcal N(y_t\mid F)\); then \(\pi_t = \alpha^L_t/(\alpha^L_t+\alpha^F_t)\).
+These \(\alpha\)'s are the scaled forward variables of the classical HMM forward algorithm.</p>
+<pre><code>m  = max(lL[t], lF[t])               # log-sum-exp shift (numerical stability only)
+aL = predL * np.exp(lL[t] - m)       # α_L  (unnormalized)
+aF = predF * np.exp(lF[t] - m)       # α_F
+piL = aL / (aL + aF + 1e-12)         # normalize → posterior  π_t</code></pre>
+
+<div class="box warn">
+<p><span class="tag" style="color:var(--warn);border-color:var(--warn)">stability</span> The likelihoods
+live in log space and can be large negatives, so <code>exp()</code> of them would underflow to 0.
+Subtracting the common maximum \(m=\max(\ell^L_t,\ell^F_t)\) rescales both by the same factor
+\(e^{-m}\), which <em>cancels exactly</em> in the ratio \(\alpha^L/(\alpha^L+\alpha^F)\). It changes
+nothing mathematically — it just keeps the arithmetic away from \(0/0\). This is the log-sum-exp trick.</p>
+</div>
+
+<h3>4.3 The warm-up guard</h3>
+<pre><code>if ipp[t] or cd[t] &lt; p0 + K_BASE:    # menstruation days, or the early-follicular baseline window
+    pi[t] = piL; continue            # hold belief, make no decision yet</code></pre>
+<p>Menstruation days and the first <code>K_BASE</code> post-period days carry no inference: the current
+cycle's follicular baseline (used to standardize the signals) must be fully in the <em>past</em> before
+any decision, so nothing from the future leaks in. During this window \(\pi\) simply stays at its floor
+(0). This is the identical strictly-causal warm-up used by the CUSUM detector.</p>
+
+<h2>5. From belief to decision — <code>hsmm_fire</code></h2>
+<p>The filter returns a whole trajectory \(\pi_1,\pi_2,\dots\). Turning it into a single live call is a
+one-liner: <strong>fire the first day the posterior exceeds a threshold \(\tau\)</strong>.</p>
+<pre><code>def hsmm_fire(rec, tau):
+    hit = np.where(rec["pi"] &gt; tau)[0]
+    return int(rec["cd"][hit[0]]) if len(hit) else None    # None = a miss (never crossed)</code></pre>
+<p>Because \(\pi_t\) is a <em>calibrated probability</em>, \(\tau\) is interpretable: \(\tau=0.5\) means
+&ldquo;declare luteal once it is more likely than not.&rdquo; This is the single knob of the HSMM
+(versus the CUSUM's two, \(H\) and \(K\)); the notebook tunes it by minimizing the same two-sided cost.
+Splitting <code>hsmm_filter</code> (expensive, run once per cycle) from <code>hsmm_fire</code> (cheap
+threshold scan) is why sweeping \(\tau\) and drawing the cost curve is essentially free.</p>
+
+<h2>6. Lineage — what each piece is called</h2>
+<ul>
+<li><strong>Predict / update skeleton</strong> — the recursive Bayes filter (Chapman&ndash;Kolmogorov
+prediction + Bayes update); the same structure as a Kalman filter, specialized to a discrete 2-state chain.</li>
+<li><strong>\(\alpha^L,\alpha^F\) and the normalization</strong> — the scaled <em>forward algorithm</em>
+for HMMs (Rabiner). Running it left-to-right with only \(y_{1:t}\) is <em>filtering</em>; using the whole
+sequence would be <em>smoothing</em> (what the retrospective notebooks do).</li>
+<li><strong>\(h(t)=f(t)/S(t)\)</strong> — the hazard from survival analysis; it is how a semi-Markov
+<em>duration</em> prior is expressed as a per-step transition probability.</li>
+<li><strong>Absorbing \(L\)</strong> — the biology (one ovulation per cycle) collapses the general
+two-way recursion to the short form above.</li>
+<li><strong>The whole thing</strong> — the online (forward-only) filtering pass of a hidden semi-Markov
+model; equivalently, a discrete-time Bayesian change-point detector with an informative prior on the
+change time.</li>
+</ul>
+
+<div class="box key">
+<p><strong>One-sentence summary.</strong> Each day we push yesterday's luteal-belief forward through a
+learned <em>hazard</em> that rises around the expected ovulation day (predict), then reweight it by how
+follicular-vs-luteal today's biometrics actually look (update) — and we declare the transition the first
+day that belief passes \(\tau\).</p>
+</div>
+
+<div class="footer">
+Generated as a companion to <code>analysis/cycle_transition_live.ipynb</code>. Open in any browser;
+equations render via MathJax (needs an internet connection for the CDN). Table 1 values are rounded to
+3 decimals.
+</div>
+
+</body>
+</html>
