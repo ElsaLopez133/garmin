@@ -192,6 +192,11 @@ def index(request: Request):
     return templates.TemplateResponse(request, "index.html", _index_ctx())
 
 
+@app.get("/privacy", response_class=HTMLResponse)
+def privacy(request: Request):
+    return templates.TemplateResponse(request, "privacy.html")
+
+
 @app.post("/start", response_class=HTMLResponse)
 def start(request: Request, email: str = Form(...), password: str = Form(...),
           age_range: str = Form(...),
