@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wearable follicular→luteal transition — modeling plan</title>
+<style>
+  :root {
+    --fg: #1a1a1a; --bg: #ffffff; --muted: #5a5a5a; --rule: #e2e2e2;
+    --accent: #2f6f4f; --accent2: #34518a; --code-bg: #f5f6f8; --warn: #b4472e;
+    --box: #f3f7f4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fg: #e6e6e6; --bg: #16181c; --muted: #9aa3ad; --rule: #2c313a;
+      --accent: #6bbf93; --accent2: #7ea2e0; --code-bg: #21252c; --warn: #e08a72;
+      --box: #1b2620;
+    }
+  }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: var(--fg); background: var(--bg); line-height: 1.62;
+    max-width: 820px; margin: 0 auto; padding: 2.2rem 1.3rem 5rem;
+    font-size: 17px;
+  }
+  h1 { font-size: 1.85rem; line-height: 1.2; margin: 0 0 .3rem; }
+  h2 { font-size: 1.35rem; margin: 2.6rem 0 .6rem; padding-top: .6rem;
+       border-top: 1px solid var(--rule); color: var(--accent); }
+  h3 { font-size: 1.08rem; margin: 1.6rem 0 .4rem; }
+  h4 { font-size: .98rem; margin: 1.3rem 0 .3rem; color: var(--muted); }
+  .sub { color: var(--muted); font-size: .98rem; margin: 0 0 1.4rem; }
+  p { margin: .7rem 0; }
+  a { color: var(--accent2); }
+  code { background: var(--code-bg); padding: .1em .38em; border-radius: 4px;
+         font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; font-size: .88em; }
+  pre { background: var(--code-bg); padding: .9rem 1rem; border-radius: 8px;
+        overflow-x: auto; font-size: .85em; line-height: 1.5;
+        border: 1px solid var(--rule); }
+  pre code { background: none; padding: 0; }
+  .box { background: var(--box); border: 1px solid var(--rule); border-left: 3px solid var(--accent);
+         border-radius: 8px; padding: .3rem 1.1rem; margin: 1.2rem 0; }
+  .key { border-left-color: var(--accent2); }
+  .warn { border-left-color: var(--warn); }
+  blockquote { margin: 1.2rem 0; padding: .3rem 1.1rem; border-left: 3px solid var(--accent2);
+               background: var(--box); border-radius: 8px; color: var(--fg); }
+  table { border-collapse: collapse; width: 100%; margin: 1.1rem 0; font-size: .92rem; }
+  th, td { border: 1px solid var(--rule); padding: .42rem .6rem; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); font-weight: 600; }
+  .muted { color: var(--muted); }
+  ul, ol { padding-left: 1.3rem; }
+  li { margin: .3rem 0; }
+  hr { border: none; border-top: 1px solid var(--rule); margin: 2.4rem 0; }
+  .done { color: var(--accent); font-weight: 600; }
+  .todo { color: var(--muted); }
+  .footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule);
+            color: var(--muted); font-size: .85rem; }
+</style>
+</head>
+<body>
+
+<h1>Wearable follicular→luteal transition — modeling plan</h1>
+<p class="sub">Companion doc for <a href="../01_discovery.ipynb"><code>01_discovery.ipynb</code></a>.</p>
+
+<p>This describes the approach for reconstructing menstrual cycle phases from Garmin
+biometrics, with the primary goal of <strong>locating the follicular→luteal transition
+(wearable luteal onset)</strong>. External hormone validation suggests this wearable
+transition can occur a few days after the LH peak, so it should not be named exact
+ovulation unless an explicit lag correction is applied. The notebook currently
+implements Steps 0–4.</p>
+
+<div class="box key">
+<p><strong>Product framing:</strong> this is a wearable-based menstrual-cycle model for femtech
+and cycle-aware sports analytics. Its core output is a dated, uncertain estimate
+of the biometric shift from follicular-like to luteal-like physiology. That output
+can contextualize recovery, readiness, sleep, HRV, and symptom patterns; it is not
+medical diagnosis and should not be presented as a definitive ovulation test.</p>
+</div>
+
+<p><strong>Retrospective vs live use:</strong> the current Garmin notebooks are retrospective.
+They see the whole completed cycle, including the next period, and can therefore
+use luteal length as a validation/regularization constraint. A live product would
+need an online/filtering version that updates <code>P(transition has happened by today)</code>
+as new days arrive, then revises confidence once the next period confirms the
+cycle length.</p>
+
+<hr>
+
+<h2>1. The problem, and the one constraint that shapes everything</h2>
+
+<p>We want to know, for any day, which cycle phase it belongs to — and above all,
+<strong>where the wearable signals switch from follicular-like to luteal-like</strong>.</p>
+
+<p>The constraint: <strong>the only real ground truth we have is period timing.</strong> It is
+self-logged and reliable. Everything anchored to it is trustworthy; everything
+else is inference.</p>
+
+<p>Concretely, period timing is preserved as its own boolean (<code>is_period</code>), while
+<code>cycle_phase</code> stores the reproductive-phase anchor label:</p>
+
+<table>
+<thead>
+<tr><th>Label</th><th>Meaning</th><th>Trust</th></tr>
+</thead>
+<tbody>
+<tr><td><code>is_period</code></td><td>Menses / bleeding days (known)</td><td>Ground truth</td></tr>
+<tr><td><code>Early follicular</code></td><td>Fixed window starting on period day 1; <strong>overlaps menses</strong></td><td>Ground truth</td></tr>
+<tr><td><code>Late luteal</code></td><td>Fixed window right <strong>before</strong> the next menses</td><td>Ground truth</td></tr>
+<tr><td><code>Not logged</code></td><td>The middle of the cycle (mid-follicular → fertile → early luteal)</td><td><strong>Unlabeled</strong></td></tr>
+<tr><td><code>garmin_predicted_fertile</code> (column)</td><td>Garmin's fertile-window guess</td><td><strong>Not</strong> truth — never used as a label</td></tr>
+</tbody>
+</table>
+
+<p>The naive approach — a classifier over only the anchored labels — throws away the
+middle and never sees the boundary it's supposed to find. So we reframe.</p>
+
+<h2>2. The reframe: it's a semi-supervised transition-location problem</h2>
+
+<p>The data already has the right shape:</p>
+
+<ul>
+<li><strong>Two confident, well-separated endpoints</strong> (<code>Early follicular</code>, including period
+days, and <code>Late luteal</code>) that bracket the transition.</li>
+<li><strong>An unlabeled middle</strong> (<code>Not logged</code>) where the transition actually happens.</li>
+</ul>
+
+<p>So the task is <strong>not</strong> "classify a day into a bucket." It is:</p>
+
+<blockquote>
+<p>Learn what confident-follicular vs confident-luteal biometrics look like, then
+use that to find <em>where the switch happens</em> inside the unlabeled middle.</p>
+</blockquote>
+
+<p>The transition is a <strong>latent variable we infer</strong>, not a label we need.</p>
+
+<p><strong>Why this is physiologically sound.</strong> The wearable follicular→luteal transition is
+a real <em>step change</em>, not a gradual drift. After ovulation the corpus luteum raises
+progesterone, which persistently lifts <strong>resting heart rate</strong>, <strong>respiration
+rate</strong>, and <strong>body temperature</strong>, and tends to <strong>lower HRV</strong>. So the model is
+detecting the downstream biometric level shift — and indeed the existing <code>Pipeline-model.ipynb</code> already
+found <code>resting_hr_slope14</code>, <code>avg_sleep_respiration_slope*</code>, and
+<code>hrv_rmssd_slope14</code> to be its most important features. We're formalizing what the
+data was already telling us.</p>
+
+<h2>3. Data structure (verified)</h2>
+
+<ul>
+<li>~731 daily rows over 2 years (<code>data/garmin_data_730days/garmin_data_730days.csv</code>).</li>
+<li><strong>27 cycles</strong>, lengths 23–32 days (median 28).</li>
+<li>Each cycle is a deterministic, period-anchored sequence:
+<code>Early follicular</code> (with <code>is_period=True</code> on bleeding days) → <code>Not logged</code> →
+<code>Late luteal</code> → next <code>Early follicular</code>.</li>
+<li>Follicular length varies cycle to cycle; <strong>luteal length is stable (~12–14 d)</strong> —
+this is the key fact we exploit for both alignment and validation.</li>
+</ul>
+
+<h2>4. The pipeline, step by step</h2>
+
+<h3>Step 0 — Confirm the signal exists <span class="done">(implemented)</span></h3>
+
+<p>Before modeling, verify the step is real. Align every cycle by cycle-day and plot
+mean RHR / respiration / HRV:</p>
+
+<ol>
+<li><strong>Forward</strong> (days since period start) — transition timing varies, so the step is
+smeared but should still be visible.</li>
+<li><strong>Backward</strong> (days before next period) — since luteal length is stable, the step
+should be <strong>sharper</strong> here.</li>
+<li><strong>Per-cycle, baseline-normalized</strong> — subtract each cycle's own early-follicular
+mean to remove the months-long RHR drift (fitness, illness) and expose the
+<em>within-cycle</em> shift.</li>
+</ol>
+
+<div class="box">
+<p><strong>Decision gate:</strong> a clean step → the rest of the pipeline works well. A weak/noisy
+step → lean harder on normalization / a composite signal before modeling, and
+lower expectations on timing precision.</p>
+</div>
+
+<h3>Step 1 — Binary anchor classifier</h3>
+
+<p>Train <strong><code>Early follicular</code> (follicular-like, including period days) vs <code>Late luteal</code>
+(luteal-like)</strong> on the confident rows <em>only</em>. <code>is_period</code> is handled separately
+(it's already known), and the <code>Not logged</code> middle is held out of training. Two well-separated endpoints make a
+much cleaner decision boundary than the old 3-class problem.</p>
+
+<ul>
+<li>Features: the biometric signals plus lagged/rolling/slope/diff versions (past-only),
+as in the existing pipeline.</li>
+<li>Prefer <strong>L1 / elastic-net</strong> regularization to prune the many correlated
+lag/roll windows into an interpretable set.</li>
+<li><strong>Normalize each cycle to its own follicular baseline</strong> so the model learns the
+within-cycle shift, not absolute levels.</li>
+</ul>
+
+<h4>How Step 1 is evaluated (and why)</h4>
+
+<p>The whole evaluation is engineered to answer one question <strong>honestly</strong>: <em>"Shown a cycle it
+has never seen, how well can the model tell a follicular day from a luteal day?"</em> Honesty
+matters because Steps 2–4 rely on the model behaving sensibly on <code>Not logged</code> days it was
+never trained on.</p>
+
+<p><strong>The pipeline</strong> (<code>SimpleImputer(median)</code> → <code>StandardScaler</code> → L1 <code>LogisticRegression</code>) runs
+as one object, which is the key anti-leakage detail: during cross-validation the imputer's
+medians and the scaler's mean/sd are learned <strong>only from the training cycles</strong>, never from the
+held-out cycle. Preprocessing before splitting would leak test information into those statistics.</p>
+
+<ul>
+<li><strong>Median imputation</strong> — features have NaNs (a <code>slope7</code> needs several prior days). Median, not
+mean, because biometric distributions are skewed with outliers (a sick day spikes RHR).</li>
+<li><strong>Standardization is mandatory with L1</strong> — the L1 penalty acts on raw coefficient magnitude,
+so features must share a scale (z-scores) or the penalty would judge them by their units, not
+their usefulness.</li>
+<li><strong>L1 logistic regression</strong> minimizes <code>log-loss + (1/C)·Σ|wⱼ|</code>. The absolute-value penalty
+drives many coefficients to <em>exactly zero</em>, giving automatic feature selection — it collapses
+each cluster of correlated lag/roll/slope windows to one representative. <code>C</code> is the <em>inverse</em>
+regularization strength (small <code>C</code> = fewer surviving features). <code>class_weight="balanced"</code> is
+harmless insurance (classes are ~even, 189 vs 182).</li>
+</ul>
+
+<p><strong>Leave-one-cycle-out CV</strong> (<code>LeaveOneGroupOut</code>, <code>groups=cycle_id</code>) is the crux. Days within a
+cycle are highly autocorrelated (today's RHR ≈ yesterday's), so ordinary random k-fold would put
+adjacent days of the <em>same</em> cycle in both train and test — the model would "remember" that
+cycle's level and score misleadingly high. Grouping by cycle forbids this: each of the 27 folds
+holds out one entire cycle and trains on the other 26 — exactly the deployment scenario.</p>
+
+<p><strong>Tuning <code>C</code></strong> — <code>GridSearchCV</code> tries 12 log-spaced values (0.01–10) and picks the one with the
+best mean leave-one-cycle-out score. We optimize <strong>ROC-AUC, not accuracy</strong>, because (a) AUC is
+threshold-independent and (b) Steps 2–4 use the <em>probability ranking</em> <code>P(luteal)</code>, not hard
+labels — we want the <code>C</code> that best <em>ranks</em> days, not the one best at one arbitrary cutoff.</p>
+
+<p><strong>Out-of-fold predictions</strong> — <code>cross_val_predict</code> re-runs the leave-one-cycle-out loop and, for
+each cycle, records the <code>P(luteal)</code> from the model trained on the <em>other</em> 26. Every row's
+probability therefore comes from a model that never saw its cycle. These OOF probabilities are
+the honest signal; thresholding at 0.5 gives hard labels for the report/confusion matrix.</p>
+
+<p><strong>Metrics:</strong></p>
+<ul>
+<li><strong>ROC-AUC</strong> (on the OOF probabilities) is the headline: the probability that a random luteal
+day is scored higher than a random follicular day. It measures whether the probability
+<em>trajectory rises through the cycle</em> — precisely what Step 3's crossing-point needs. 0.5 =
+chance, 1.0 = perfect ranking.</li>
+<li><strong>Classification report</strong> (precision/recall/F1) describes behavior at the single 0.5 threshold;
+it can disagree with AUC if 0.5 is a poorly placed cutoff.</li>
+<li><strong>Confusion matrix</strong> shows <em>error direction</em> — e.g. follicular days mislabeled luteal would
+drag Step 3's estimated transition earlier.</li>
+</ul>
+
+<div class="box warn">
+<p><strong>Honest caveat:</strong> <code>C</code> is chosen using folds from all cycles and then evaluated with the same
+leave-one-cycle-out scheme, so the OOF AUC is a <em>mild</em> over-estimate. A fully rigorous version
+would nest the <code>C</code>-search inside each outer fold; with one scalar hyperparameter and 27 cycles
+the effect is small.</p>
+</div>
+
+<h4>Step 1 findings</h4>
+
+<p>Run on 26 complete cycles (312 balanced anchor rows after complete-cycle filtering):</p>
+
+<ul>
+<li><strong>Out-of-fold AUC ≈ 0.85</strong> (CV 0.87), balanced ~78% precision/recall — a solid
+follicular-vs-luteal separator on entirely unseen cycles.</li>
+<li>The joint <code>C</code> / <code>l1_ratio</code> search was <em>free to choose L2</em> (which keeps correlated
+features together). After correcting follicular anchors to include period days, it
+picked <strong>elastic-net with weak regularization</strong> (<code>C≈5.34</code>, <code>l1_ratio=0.2</code>) and kept
+all engineered features, so the separator is broader and less sparse than the earlier
+RHR-only version.</li>
+<li><strong>HRV is real but weaker and partly redundant — not insignificant.</strong> Standalone
+leave-one-cycle-out AUCs: <code>resting_hr</code> 0.81, <code>avg_sleep_stress</code> 0.76, <code>avgStressLevel</code>
+0.71, <code>hrv_rmssd</code> 0.68, <code>avg_sleep_respiration</code> 0.68, <code>sleep_score</code> 0.64. HRV features
+remain correlated with the RHR/stress features, but the corrected-anchor model no longer
+prunes them out.</li>
+<li>Takeaway: <code>P(luteal)</code> remains useful for ranking follicular vs luteal anchor days, but
+the corrected anchors make Step 3 less clean than the earlier sparse RHR-only run.</li>
+</ul>
+
+<h3>Step 2 — Score the full calendar</h3>
+
+<p>Apply the classifier to <strong>every day</strong>, including <code>Not logged</code>, to get a per-day
+<code>P(luteal)</code> trajectory: low early in the cycle, high late.</p>
+
+<h3>Step 3 — Locate the transition per cycle from <code>P(luteal)</code></h3>
+
+<p>The follicular→luteal boundary is where <code>P(luteal)</code> rises from low to high. For each
+cycle, find that crossing/change-point on the probability trajectory, but only inside
+a physiologically plausible middle window. The detector now constrains the search to:</p>
+
+<ul>
+<li>the unlabeled <code>Not logged</code> middle,</li>
+<li>at least a few days after period end,</li>
+<li>at least a few days before the next period,</li>
+<li>and no longer than a tunable maximum luteal length.</li>
+</ul>
+
+<p>This prevents impossible early picks, such as a transition that would imply a
+~24-day luteal phase. If the model trajectory does not contain a usable low→high
+step, use a clearly marked low-confidence constrained-midpoint fallback rather than
+pretending the probability curve localized the transition.</p>
+
+<h4>Step 3 findings</h4>
+
+<p>Run on 26 complete cycles:</p>
+
+<ul>
+<li>Estimated a transition for <strong>26 / 26</strong> complete cycles.</li>
+<li><strong>24 / 26</strong> estimates were model-supported change-points or crossings; <strong>2 / 26</strong>
+used the low-confidence constrained-midpoint fallback.</li>
+<li>Luteal length (<code>next period start − estimated transition</code>) clustered around
+<strong>median 11 days</strong> (mean 11.85, SD 2.68, range 8–17) after the current physiological
+search constraints.</li>
+<li><strong>19 / 26</strong> estimates landed inside the 10–16 day review band: both low-confidence
+fallbacks were inside the band, while the model-supported estimates split 17 ok /
+7 review. This is useful but still weak validation, so Step 3 should be treated as
+a model-based candidate transition rather than final truth.</li>
+<li>Garmin's fertile-window prediction remains only a weak comparator; the detected
+transitions generally fall near or just after that window, but it was not used as
+a label.</li>
+</ul>
+
+<div class="box key">
+<p><strong>Interpretation:</strong> this transition is the estimated <strong>wearable luteal onset</strong>. In
+mcPHASES external validation, a similar HSMM boundary aligned best with labelled luteal
+onset and trailed the LH peak by about <strong>3.5 days</strong>. If an approximate LH-peak
+ovulation proxy is needed, report <code>transition_day - 3.5</code>, but keep it separate from
+the primary transition estimate.</p>
+</div>
+
+<h3>Step 4 — Direct change-point on AUC-selected engineered features</h3>
+
+<p>Step 4 is a signal-based cross-check, not another classifier. It uses the already-built
+engineered features from Step 1, but does not use the multifeature <code>P(luteal)</code> model.</p>
+
+<p>The logic:</p>
+
+<ol>
+<li>Compute standalone leave-one-cycle-out AUC for <strong>every engineered feature</strong>:
+baseline-normalized values, lags, rolling means, diffs, and slopes.</li>
+<li>Rank features by <code>abs(AUC − 0.5)</code>, because features below 0.5 can still be useful
+after flipping their direction.</li>
+<li>Select a small, interpretable set: the best feature from each biometric signal
+family, capped at a tunable maximum.</li>
+<li>Orient each selected feature so higher means "more luteal".</li>
+<li>Build an AUC-weighted composite, with weights proportional to <code>abs(AUC − 0.5)</code>.</li>
+<li>Apply the same two-level low→high change-point function directly to that composite,
+inside the same constrained middle window as Step 3.</li>
+</ol>
+
+<p>So Step 4 asks:</p>
+
+<blockquote>
+<p>If we ignore the classifier and look directly at the strongest engineered biometric
+trajectories, where is the best sustained low→high step?</p>
+</blockquote>
+
+<p>This makes Step 4 an independent sanity check on Step 3. If the <code>P(luteal)</code> transition
+and the engineered-feature transition agree, confidence increases. If they disagree,
+the per-cycle plots show whether the probability model or the raw biometric trend is
+more plausible.</p>
+
+<h4>Step 4 findings</h4>
+
+<p>Current run:</p>
+
+<ul>
+<li>Top selected feature families were <code>resting_hr_diff7</code>, <code>avg_sleep_stress_roll3</code>,
+<code>avgStressLevel_roll7</code>, and <code>hrv_rmssd_bn</code>.</li>
+<li>Feature-step transitions were estimated for <strong>26 / 26</strong> cycles.</li>
+<li><strong>19 / 26</strong> were feature-step-supported; <strong>7 / 26</strong> used the constrained midpoint
+fallback.</li>
+<li>Luteal length clustered around <strong>median 11.5 days</strong> (mean 11.88, SD 2.18,
+range 8–17).</li>
+<li><strong>22 / 26</strong> estimates landed inside the 10–16 day review band.</li>
+<li>Compared with Garmin's fertile-window proxy (<code>fertile-window end - 2</code>), median
+offset was <strong>-0.5 days</strong>, with <strong>20 / 26</strong> estimates within ±2 days.</li>
+</ul>
+
+<h3>Step 5 — Reconstruct full phases</h3>
+
+<p>With period (known) + transition (estimated), every phase follows — no Garmin
+prediction needed:</p>
+
+<ul>
+<li><strong>Period</strong> = known separately via <code>is_period</code>.</li>
+<li><strong>Follicular</strong> = period start → estimated transition.</li>
+<li><strong>Luteal</strong> = estimated transition → next period.</li>
+</ul>
+
+<h2>5. Validation without transition ground truth</h2>
+
+<p>In the Garmin-only record we can't directly check LH-peak ovulation timing, but we
+have a strong biological prior: <strong>luteal phase length is stable (~12–14 days), while
+follicular length varies.</strong> So:</p>
+
+<ul>
+<li>Check that <code>next period start − estimated transition</code> <strong>clusters tightly</strong> around
+~12–14 days across the 27 cycles. Tight clustering is evidence that the crossing
+lands near the biological luteal transition, not proof of exact LH-peak ovulation.</li>
+<li><strong>Flag</strong> cycles where it falls outside ~10–16 days as likely errors.</li>
+<li>Use <code>garmin_predicted_fertile</code> only as a <strong>weak comparator</strong> — agreement is
+reassuring, disagreement proves nothing either way. It is Garmin's algorithmic
+calendar estimate, not hormonal ground truth.</li>
+</ul>
+
+<h2>6. Refinements that matter</h2>
+
+<ul>
+<li><strong>Per-cycle baseline normalization</strong> (subtract early-follicular mean) — usually
+makes or breaks transition detection, because the ~2–4 bpm luteal rise is small
+next to months-long baseline drift.</li>
+<li><strong>Consider mid-luteal, not late-luteal, as the "high" anchor</strong> — just before
+menses, progesterone withdrawal starts dropping RHR again, weakening
+<code>Late luteal</code> as a clean "high" endpoint.</li>
+<li><strong>Group cross-validation by cycle</strong> (leave-one-cycle-out) rather than a plain
+time-series split, so the estimate reflects "generalizes to an unseen cycle."</li>
+</ul>
+
+<h2>7. Honest caveats</h2>
+
+<ul>
+<li><strong>~27 cycles / ~27 transitions</strong> is a small sample for a noisy step. Realistic
+target: locate wearable luteal onset <strong>to within a few days</strong>, not exact LH-peak
+ovulation.</li>
+<li>Labels are fixed windows around menses, so the endpoints themselves carry some
+slop; the method tolerates this but can't beat it entirely.</li>
+<li>The retrospective boundary search cannot be deployed unchanged in real time,
+because live scoring does not yet know the next period date or final luteal
+length. Use an online posterior/confidence curve for live applications.</li>
+</ul>
+
+<h2>8. Status / roadmap</h2>
+
+<ul>
+<li><span class="done">[x] Step 0</span> — cycle segmentation + alignment plots (signal check). <em>Step confirmed a visible luteal step.</em></li>
+<li><span class="done">[x] Step 1</span> — binary follicular-vs-luteal classifier (per-cycle baseline normalization, elastic-net regularization, leave-one-cycle-out CV). <em>OOF AUC ≈ 0.85 after correcting follicular anchors to include period days.</em></li>
+<li><span class="done">[x] Step 2</span> — score <code>P(luteal)</code> across the full calendar (honest leave-one-cycle-out per day, including <code>Not logged</code>).</li>
+<li><span class="done">[x] Step 3</span> — per-cycle transition location + validation against the luteal-length prior. <em>26 / 26 cycles estimated; 19 / 26 within the 10–16 day review band; 24 model-supported estimates.</em></li>
+<li><span class="done">[x] Step 4</span> — direct two-level change-point on AUC-selected engineered features. <em>26 / 26 cycles estimated; 22 / 26 inside the 10–16 day review band.</em></li>
+<li><span class="todo">[ ] Step 5</span> — full-phase reconstruction and per-cycle transition plots.</li>
+</ul>
+
+<div class="footer">
+Companion to <code>analysis/01_discovery.ipynb</code>. Open in any browser — no dependencies.
+Converted from <code>discovery_plan.md</code>.
+</div>
+
+</body>
+</html>
