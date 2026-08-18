@@ -8,8 +8,6 @@ uploads only that CSV (no email/password) to the study's Drive folder.
 
 Build into a double-click app with PyInstaller (see BUILD.md).
 
-Before building, fill in ENDPOINT_URL and UPLOAD_TOKEN below with the values
-from your deployed Google Apps Script (see upload_endpoint.gs + BUILD.md).
 """
 
 import base64
