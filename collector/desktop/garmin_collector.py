@@ -11,6 +11,8 @@ Build into a double-click app with PyInstaller (see BUILD.md).
 """
 
 import base64
+import os
+import re
 import sys
 import threading
 import uuid
@@ -28,9 +30,45 @@ import garmin_fetch  # noqa: E402
 # ---------------------------------------------------------------------------
 # CONFIG  — fill these in before building the app (see BUILD.md)
 # ---------------------------------------------------------------------------
+# The distributed app gets these baked in by the CI secrets injection (or filled
+# in by hand for a local build). For LOCAL testing you can instead leave the
+# placeholders and set GARMIN_ENDPOINT_URL / GARMIN_UPLOAD_TOKEN in the
+# environment or a gitignored .env — the override below picks them up, matching
+# how collector/server/app.py reads its config.
 ENDPOINT_URL = "PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE"
 UPLOAD_TOKEN = "PASTE_THE_SHARED_SECRET_HERE"
 DEFAULT_DAYS = 365
+
+# Basic sanity check on the email before we ever hit Garmin — rejects obvious
+# typos (missing @, a comma for a dot, spaces) so junk input fails instantly
+# instead of triggering a pointless login attempt and a confusing MFA prompt.
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _load_dotenv():
+    """Populate os.environ from a repo-root .env, for local dev only.
+
+    Minimal KEY=VALUE parser (no python-dotenv dependency, so it doesn't bloat the
+    built app). Existing env vars win; a missing file is fine. In the frozen app
+    there is no .env, so this is a no-op there.
+    """
+    for path in (Path.cwd() / ".env", Path(__file__).resolve().parents[2] / ".env"):
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
+        except OSError:
+            pass
+
+
+_load_dotenv()
+# Environment / .env overrides the source values when set (local dev); otherwise
+# the baked-in constants above are used (the distributed app).
+ENDPOINT_URL = os.environ.get("GARMIN_ENDPOINT_URL") or ENDPOINT_URL
+UPLOAD_TOKEN = os.environ.get("GARMIN_UPLOAD_TOKEN") or UPLOAD_TOKEN
 
 
 # ===========================================================================
@@ -154,6 +192,12 @@ class CollectorApp:
         if not self.email.get().strip() or not self.password.get():
             messagebox.showwarning("Missing info", "Please enter your Garmin email and password.")
             return
+        if not EMAIL_RE.match(self.email.get().strip()):
+            messagebox.showwarning(
+                "Check your email",
+                "That doesn't look like a valid email address.\n"
+                "Enter the email you use to sign in to Garmin Connect.")
+            return
         if not self.consent.get():
             messagebox.showwarning("Consent needed", "Please tick the consent box to continue.")
             return
@@ -179,6 +223,10 @@ class CollectorApp:
             self.status("Logging in to Garmin…")
             api = Garmin(email=email, password=password, prompt_mfa=self.prompt_mfa)
             garmin_fetch.login_with_retry(api)
+            # Fail fast if the session didn't actually authenticate, instead of
+            # downloading an empty dataset and erroring only at the end.
+            self.status("Verifying login…")
+            garmin_fetch.verify_login(api)
 
             # One bar step per metric, plus the final "Merging data…" step.
             metrics = garmin_fetch.MINIMAL_METRICS
