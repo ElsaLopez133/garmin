@@ -5,12 +5,8 @@ name: Build collector apps
 # "Artifacts" section, then drop them in your Drive folder.
 
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - 'collector/desktop/garmin_collector.py'
-      - '.github/workflows/build.yml'
-  workflow_dispatch:        # lets you trigger a build manually from the Actions tab
+  workflow_dispatch:         # build only when you click "Run workflow" in the Actions tab
+                             # (rebuilds are rare — only when the endpoint/token or code changes)
 
 jobs:
   build:
@@ -33,6 +29,22 @@ jobs:
 
       - name: Install dependencies
         run: pip install garminconnect==0.2.38 garth==0.5.21 pandas numpy requests pyinstaller
+
+      - name: Inject endpoint config from secrets
+        # Replaces the PASTE_* placeholders in the source with the repo secrets,
+        # so the real URL/token are baked into the binary without ever being
+        # committed. Runs on the runner only; the change is never pushed back.
+        shell: python
+        env:
+          ENDPOINT_URL: ${{ secrets.COLLECTOR_ENDPOINT_URL }}
+          UPLOAD_TOKEN: ${{ secrets.COLLECTOR_UPLOAD_TOKEN }}
+        run: |
+          import os, pathlib
+          p = pathlib.Path("collector/desktop/garmin_collector.py")
+          s = p.read_text()
+          s = s.replace('"PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE"', repr(os.environ["ENDPOINT_URL"]))
+          s = s.replace('"PASTE_THE_SHARED_SECRET_HERE"', repr(os.environ["UPLOAD_TOKEN"]))
+          p.write_text(s)
 
       - name: Build app
         # --paths collector lets PyInstaller find & bundle the shared
