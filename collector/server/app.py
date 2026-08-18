@@ -245,6 +245,15 @@ def start(request: Request, email: str = Form(...), password: str = Form(...),
         PENDING_MFA[token] = {"api": api, "client_state": result[1], "days": days, "meta": meta}
         return templates.TemplateResponse(request, "mfa.html", {"token": token})
 
+    # Confirm the session actually authenticated before spending minutes downloading.
+    try:
+        garmin_fetch.verify_login(api)
+    except Exception:  # noqa: BLE001
+        return templates.TemplateResponse(
+            request, "index.html",
+            _index_ctx({"error": "Could not log in to Garmin. Please double-check your "
+                                 "email and password and try again."}), status_code=400)
+
     job_id = _start_download_job(api, days, meta)
     return RedirectResponse(url=f"/status/{job_id}", status_code=303)
 
@@ -258,6 +267,7 @@ def mfa(request: Request, token: str = Form(...), code: str = Form(...)):
             _index_ctx({"error": "Your session expired. Please start again."}), status_code=400)
     try:
         entry["api"].resume_login(entry["client_state"], code.strip())
+        garmin_fetch.verify_login(entry["api"])
     except Exception as e:  # noqa: BLE001
         return templates.TemplateResponse(
             request, "mfa.html",

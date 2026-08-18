@@ -82,17 +82,23 @@ def build_calendar_days(calendar_entries):
     return calendar_days
 
 
+class GarminLoginError(Exception):
+    """Login did not actually authenticate (e.g. wrong email/password)."""
+
+
+def _is_rate_limit_error(exc):
+    """True if exc (or any cause in its chain) looks like a Garmin 429."""
+    current = exc
+    while current is not None:
+        message = str(current).lower()
+        if "429" in message or "too many requests" in message or "rate limit" in message:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
 def login_with_retry(api, max_attempts=5, base_delay=15, tokenstore=None):
     """Log in with cached tokens, retrying when Garmin rate-limits auth."""
-    def is_rate_limit_error(exc):
-        current = exc
-        while current is not None:
-            message = str(current).lower()
-            if "429" in message or "too many requests" in message or "rate limit" in message:
-                return True
-            current = current.__cause__ or current.__context__
-        return False
-
     tokenstore = Path(os.environ.get("GARMINTOKENS", tokenstore or DEFAULT_TOKENSTORE))
     tokenstore.mkdir(parents=True, exist_ok=True)
 
@@ -101,11 +107,31 @@ def login_with_retry(api, max_attempts=5, base_delay=15, tokenstore=None):
             api.login(tokenstore=str(tokenstore))
             return
         except Exception as exc:
-            if not (isinstance(exc, GarminConnectTooManyRequestsError) or is_rate_limit_error(exc)):
+            if not (isinstance(exc, GarminConnectTooManyRequestsError) or _is_rate_limit_error(exc)):
                 raise
             if attempt == max_attempts:
                 raise
             time.sleep(base_delay * (2 ** (attempt - 1)))
+
+
+def verify_login(api):
+    """Confirm the session is genuinely authenticated, else raise GarminLoginError.
+
+    garth/garminconnect can hand back a session that *looks* usable even when the
+    credentials were wrong, instead of raising — so the caller would otherwise grind
+    through a full, empty download before failing. One cheap authenticated call
+    (``get_full_name``) makes a bad login fail fast with a clear message. Rate-limit
+    errors are re-raised untouched so callers can back off.
+    """
+    try:
+        name = api.get_full_name()
+    except Exception as exc:
+        if _is_rate_limit_error(exc):
+            raise
+        raise GarminLoginError("Login failed — please check your email and password.") from exc
+    if not name:
+        raise GarminLoginError("Login failed — please check your email and password.")
+    return name
 
 
 def _fetch_hrv(api, date_list):
