@@ -16,12 +16,13 @@ The project has three parts:
 personal/      garmin_download.py, garmin_explore_metrics.py, garmin_plot.py
 preprocessing/ cycle_phases.py            derive Early-follicular / Late-luteal anchors
                outliers.py                flag confounded days (illness / alcohol / travel)
-analysis/      garmin_cycle_check.py, garmin_ovulation_check.py,
-               combine_participants.py, garmin_correlations.ipynb, Pipeline-model.ipynb,
-               cycle_transition_model.ipynb   change-point ovulation estimate (baseline)
-               cycle_hsmm_model.ipynb         hidden semi-Markov ovulation estimate
-               mcphases_truth.py              hormonal ground truth from the mcPHASES dataset
-               validate_mcphases.ipynb        validate the HSMM against real (LH-surge) ovulation
+analysis/      01_discovery.ipynb         is the follicular→luteal shift detectable? (baseline)
+               02_model_hsmm.ipynb        one-boundary HSMM ovulation estimate + posterior
+               03_validate_mcphases.ipynb validate the HSMM vs real (LH-surge) ovulation
+               04_live_detection.ipynb    online / forward-filtered detector
+               cyclelib/                  shared model library (hsmm, emissions, features, truth)
+               theory/                    HTML companion docs (design plan, HSMM maths)
+               garmin_cycle_check.py, garmin_ovulation_check.py, combine_participants.py
 collector/     garmin_fetch.py            shared download engine
                fetch_uploads.py           pull collected CSVs from Drive
                upload_endpoint.gs         Google Apps Script (Drive endpoint)
@@ -114,37 +115,39 @@ python analysis/garmin_ovulation_check.py data/participants/garmin_data_<id>.csv
 - **garmin_ovulation_check.py** — test whether ovulation is detectable from RHR/HRV
   (paired pre/post test + aligned plot).
 - **combine_participants.py** — merge all participants, print a QC triage table, and write `data/combined/{all_participants,ovulation_eligible,participant_summary}.csv`.
-- **Pipeline-model.ipynb** — feature engineering + cycle-phase classification.
 
-### Ovulation-timing models
+### The four-stage notebook arc
 
-Both take the preprocessed data (phase anchors + confounder masking) and estimate the
-follicular→luteal boundary (ovulation) per cycle, checked against Garmin's rule (ovulation =
-fertile-window end − 2 days).
+The analysis is a sequence from *does a signal exist?* to *does it run live?*, all built on
+the shared **`cyclelib/`** library so every stage uses the same one-boundary HSMM.
+See **`analysis/README.md`** for the full walkthrough.
 
-- **cycle_transition_model.ipynb** — *baseline.* Per-cycle **change-point** on an AUC-weighted
-  composite of RHR/HRV/respiration/sleep-stress: find the day that best splits each cycle's
-  post-period signal into a low then a high level. Includes a confounder-masking threshold sweep.
-- **cycle_hsmm_model.ipynb** — the same boundary as a **hidden semi-Markov model**
-  (`Menstruation → Follicular → Luteal`). Multivariate-Gaussian emissions per state (seeded
-  semi-supervised from the anchors) plus an explicit **luteal-duration prior** — the semi-Markov
-  piece a plain HMM lacks (its geometric dwell can't represent a ~13-day luteal phase). Yields a
-  MAP ovulation day *and* a posterior over the boundary (per-cycle confidence). On the owner's
-  record it slightly beats the change-point baseline (tighter luteal spread, offset centered on 0).
+- **`01_discovery.ipynb`** — *baseline.* Is the follicular→luteal shift detectable at all?
+  Aligned-cycle profiles → a binary follicular-vs-luteal anchor classifier → a per-day
+  `P(luteal)` trajectory → per-cycle **change-point**. Design companion:
+  `analysis/theory/discovery_plan.html`.
+- **`02_model_hsmm.ipynb`** — the boundary as a **hidden semi-Markov model**
+  (`Menstruation → Follicular → Luteal`). Multivariate-Gaussian emissions per state plus an
+  explicit **luteal-duration prior** — the semi-Markov piece a plain HMM lacks (its geometric
+  dwell can't represent a ~13-day luteal phase). Yields a MAP ovulation day *and* a posterior
+  over the boundary (per-cycle confidence).
+- **`03_validate_mcphases.ipynb`** — validate the HSMM against the **LH surge** (real hormonal
+  ovulation), not just Garmin's calendar rule, using the public
+  [mcPHASES](https://physionet.org/content/mcphases/) dataset (Fitbit biometrics + Mira hormone
+  assays). `cyclelib/truth_mcphases.py` maps the Fitbit signals onto our Garmin schema
+  (`resting_hr`, `hrv_rmssd`, `avg_sleep_respiration`) and extracts the per-cycle LH-peak day.
+  The dataset lives under `data/external/` (gitignored). The boundary tracks labelled luteal
+  onset and trails the LH peak by ~3.5 days (the expected biometric lag); the hormonal luteal
+  length independently supports the model's 13-day prior.
+- **`04_live_detection.ipynb`** — can it run **online**, with no future knowledge? Causal
+  features, a CUSUM detector, and a **forward-filtered HSMM** that updates
+  `P(transition has happened by today)` as days arrive. Maths companion:
+  `analysis/theory/hsmm_filter_explanation.html`.
 
-### External validation on hormonal truth
-
-The models above could only be checked against Garmin's *own* calendar rule (two algorithms
-agreeing, not truth). **`validate_mcphases.ipynb`** scores the HSMM against the **LH surge** —
-real hormonal ovulation — using the public [mcPHASES](https://physionet.org/content/mcphases/)
-dataset (Fitbit biometrics + Mira hormone assays, 42 participants). `mcphases_truth.py` maps the
-Fitbit signals onto our Garmin schema (`resting_hr`, `hrv_rmssd`, `avg_sleep_respiration`;
-Garmin's sleep-stress has no clean equivalent) and extracts the per-cycle LH-peak ovulation day.
-The dataset lives under `data/external/` (gitignored). Headline: with **pooled** emissions on
-per-person-standardized signals the boundary lands ~1 day after the LH surge (within-2 days ≈ 57%,
-within-3 ≈ 76%), and the hormonal luteal length (13.3 d) independently confirms the model's
-13-day duration prior. Honest caveats — Fitbit `resting_hr` transfers poorly (inverted vs Garmin)
-and raw skin temperature needs baseline-relative handling — are documented in the notebook.
+**`cyclelib/`** is the single source of truth for the model: `hsmm.py` (one-boundary boundary
+search + Gaussian emissions), `emissions.py` (anchor extraction + generative/discriminative
+emissions), `features.py` (robust median/MAD standardization), `truth_mcphases.py` (mcPHASES
+hormonal ground truth).
 
 ---
 
@@ -158,7 +161,7 @@ fetch_uploads.py ────────────┘-> data/participants/
 combine_participants.py ───────-> data/combined/  ─┐
                                                     ├─> preprocessing/ (phase anchors,
                                                     │     confounder masking)
-                                                    └─> analysis + Pipeline-model.ipynb
+                                                    └─> analysis notebooks 01–04 (via cyclelib/)
 ```
 
 ---
