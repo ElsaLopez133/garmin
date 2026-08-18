@@ -15,7 +15,7 @@ We handle it as safely as possible:
 Run locally:
     python -m venv .venv
     source .venv/bin/activate
-    pip install -r collector/server/requirements.txt
+    pip install ".[server]"          # deps come from the root pyproject.toml
     uvicorn collector.server.app:app --reload
 Then open http://127.0.0.1:8000
 """

@@ -35,13 +35,15 @@ data/  figs/   outputs (gitignored)
 
 ## Installation
 
-Python 3.10+ (the venv uses 3.12).
+Python 3.10+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+uv sync --all-extras          # full env (adds the server + analysis extras)
 ```
+
+Dependencies are defined in `pyproject.toml`: a shared core plus `[server]` and
+`[analysis]` optional groups. Plain `uv sync` installs only the core (download +
+collector); use `--all-extras`, or a single group like `--extra analysis`, for the rest.
 
 Run all scripts **from the repo root** so relative `data/`/`figs/` paths resolve.
 
@@ -50,9 +52,9 @@ Run all scripts **from the repo root** so relative `data/`/`figs/` paths resolve
 ## 1. Your own data (`personal/`)
 
 ```bash
-python personal/garmin_download.py        # prompts: email, password, number of days
-python personal/garmin_plot.py            # prompts: number of days (data must exist)
-python personal/garmin_explore_metrics.py # explore the API response structure
+uv run python personal/garmin_download.py        # prompts: email, password, number of days
+uv run python personal/garmin_plot.py            # prompts: number of days (data must exist)
+uv run python personal/garmin_explore_metrics.py # explore the API response structure
 ```
 
 `garmin_download.py` saves per-metric JSON + a merged CSV to `data/garmin_data_{N}days/`. Credentials are entered at runtime, never stored.
@@ -73,7 +75,7 @@ Both write a CSV (with consent + metadata columns) to a **Google Drive folder** 
 Set your endpoint + token once in a `.env` file (copy `.env.example` → `.env`), then:
 
 ```bash
-python collector/fetch_uploads.py     # download all participant CSVs -> data/participants/
+uv run python collector/fetch_uploads.py     # download all participant CSVs -> data/participants/
 ```
 
 ---
@@ -97,8 +99,8 @@ stay decoupled and the modelling choices below are tunable in one place.
   threshold is picked empirically in the transition notebook's masking sweep (Step B).
 
 ```bash
-python preprocessing/cycle_phases.py data/…/….csv -a 5      # add anchor labels
-python preprocessing/outliers.py     data/…/….csv --mask -o clean.csv
+uv run python preprocessing/cycle_phases.py data/…/….csv -a 5      # add anchor labels
+uv run python preprocessing/outliers.py     data/…/….csv --mask -o clean.csv
 ```
 
 ---
@@ -106,9 +108,9 @@ python preprocessing/outliers.py     data/…/….csv --mask -o clean.csv
 ## 3. Analysis (`analysis/`)
 
 ```bash
-python analysis/combine_participants.py   # stack participant CSVs + QC -> data/combined/
-python analysis/garmin_cycle_check.py     data/participants/garmin_data_<id>.csv
-python analysis/garmin_ovulation_check.py data/participants/garmin_data_<id>.csv
+uv run python analysis/combine_participants.py   # stack participant CSVs + QC -> data/combined/
+uv run python analysis/garmin_cycle_check.py     data/participants/garmin_data_<id>.csv
+uv run python analysis/garmin_ovulation_check.py data/participants/garmin_data_<id>.csv
 ```
 
 - **garmin_cycle_check.py** — verify cycle phases (summary + plot).

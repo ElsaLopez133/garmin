@@ -1,9 +1,0 @@
-fastapi
-uvicorn[standard]
-jinja2
-python-multipart
-requests
-garminconnect==0.3.6
-garth==0.8.0
-pandas
-numpy

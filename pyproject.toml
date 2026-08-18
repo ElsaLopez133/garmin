@@ -1,0 +1,46 @@
+[project]
+name = "garmin-cycle-analytics"
+version = "0.1.0"
+description = "Download Garmin health data and analyze menstrual cycle phase and ovulation signals."
+requires-python = ">=3.10"
+# Shared core — the download engine (collector/garmin_fetch.py), the collector
+# front-ends, and the personal scripts all need these.
+dependencies = [
+    "garminconnect==0.3.6",
+    "garth==0.8.0",
+    "pandas",
+    "numpy",
+    "requests",
+]
+
+[project.optional-dependencies]
+# The deployed FastAPI web collector. Render installs this with `pip install .[server]`
+# (base + these), which reproduces the old collector/server/requirements.txt exactly.
+server = [
+    "fastapi",
+    "uvicorn[standard]",
+    "jinja2",
+    "python-multipart",
+]
+# Plotting, stats, and ML for the personal scripts and the analysis notebooks.
+analysis = [
+    "tqdm",
+    "matplotlib",
+    "seaborn",
+    "scipy",
+    "scikit-learn",
+]
+
+# This is a deps-only project (no library to ship), but `pip install .[server]`
+# on Render still builds it, so pip needs a backend. setuptools with an empty
+# package list installs the dependencies without trying to auto-discover /
+# package the top-level folders (personal/, collector/, analysis/, …).
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = []
+
+[tool.uv]
+package = false
