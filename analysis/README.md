@@ -56,8 +56,17 @@ Gaussian emissions and the discriminative `P(luteal | x)` classifier.
 Run everything **from the repo root** so `data/` and `figs/` paths resolve, in the
 project venv (`source .venv/bin/activate`). Stages 1, 2 and 4 read the owner's record
 (`data/garmin_data_730days/…`); stage 3 reads the mcPHASES export under
-`data/external/…`. The notebooks put both the repo root (for `preprocessing`) and
-`analysis/` (for `cyclelib`) on `sys.path`, so a plain "Restart & Run All" works.
+`data/external/…`. `cyclelib` and `preprocessing` import as installed packages
+(`uv sync --all-extras` does an editable install), so `import cyclelib` works from any
+directory — no `sys.path` shims — and a plain "Restart & Run All" works.
+
+Two one-time setup steps for contributors:
+
+```bash
+uv sync --all-extras          # editable install + dev tools (pytest, pre-commit, nbstripout)
+uv run pre-commit install     # keep notebook diffs clean (strips metadata, keeps outputs)
+uv run pytest                 # cyclelib + collector-path unit tests
+```
 
 ## Open threads / what's next
 
