@@ -30,17 +30,33 @@ analysis = [
     "scipy",
     "scikit-learn",
 ]
+# Test + notebook-hygiene tooling. Not needed at runtime or on Render.
+dev = [
+    "pytest",
+    "nbstripout",
+    "pre-commit",
+]
 
-# This is a deps-only project (no library to ship), but `pip install .[server]`
-# on Render still builds it, so pip needs a backend. setuptools with an empty
-# package list installs the dependencies without trying to auto-discover /
-# package the top-level folders (personal/, collector/, analysis/, …).
+# The project installs two small pure-Python packages so `import cyclelib` /
+# `import preprocessing` resolve everywhere (tests, notebooks, a plain REPL) without
+# sys.path shims. Everything else (personal/, collector/) is still resolved from the
+# working directory, not packaged. On Render, `pip install .[server]` builds these two
+# packages too; the server never imports them, and their deps (numpy/pandas) are core,
+# so they are inert there.
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = []
+packages = ["cyclelib", "preprocessing"]
+
+[tool.setuptools.package-dir]
+# preprocessing is already top-level; cyclelib is nested under analysis/.
+cyclelib = "analysis/cyclelib"
 
 [tool.uv]
-package = false
+# Install the project itself (editable) so cyclelib/preprocessing are importable.
+package = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
