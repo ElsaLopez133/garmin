@@ -1,0 +1,18 @@
+# Notebook output hygiene: keep diffs reviewable by stripping volatile metadata and
+# execution counts on commit, while KEEPING rendered outputs (the analysis notebooks
+# read as reports, so figures/tables should still show on GitHub).
+#
+# Setup (once):
+#   uv sync --all-extras        # installs pre-commit + nbstripout (the `dev` extra)
+#   uv run pre-commit install
+# Normalize the existing notebooks once:
+#   uv run pre-commit run --all-files
+#
+# To strip images too (smaller diffs, no rendered reports), drop the --keep-output arg.
+# Bump the pinned rev with: uv run pre-commit autoupdate
+repos:
+  - repo: https://github.com/kynan/nbstripout
+    rev: "0.8.1"
+    hooks:
+      - id: nbstripout
+        args: ["--keep-output"]
