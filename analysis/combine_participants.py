@@ -45,42 +45,68 @@ def first(df, col, default="?"):
     return df[col].iloc[0] if col in df.columns and len(df) else default
 
 
+def summarize(df, fallback_id):
+    """Label a participant frame and build its one-row QC record.
+
+    Returns ``(df, qc_row)``. ``participant_id`` is taken from the frame if present,
+    else ``fallback_id`` (the file stem); a participant is ``ovulation_usable`` only when
+    not on hormonal contraception, with >=2 logged cycles and >50% resting-HR coverage.
+    """
+    pid = first(df, "participant_id", fallback_id)
+    if "participant_id" not in df.columns:
+        df = df.copy()
+        df["participant_id"] = pid  # ensure every row is labelled
+
+    n_cyc, avg_len, pct_logged = cycle_stats(df)
+    contraception = first(df, "contraception")
+    rhr_cov = round(df["resting_hr"].notna().mean() * 100, 1) if "resting_hr" in df.columns else 0.0
+    hormonal = contraception in HORMONAL
+    usable = (not hormonal) and n_cyc >= 2 and rhr_cov > 50
+
+    qc_row = {
+        "participant_id": pid,
+        "days": len(df),
+        "cycles": n_cyc,
+        "avg_cycle_len": avg_len,
+        "phase_logged_%": pct_logged,
+        "rhr_coverage_%": rhr_cov,
+        "contraception": contraception,
+        "ovulation_usable": "yes" if usable else "no",
+    }
+    return df, qc_row
+
+
+def build_combined(items):
+    """Stack labelled participant frames + their QC table.
+
+    ``items`` is an iterable of ``(fallback_id, DataFrame)``. Returns
+    ``(combined_df, qc_df)`` -- the pure core of :func:`main`, importable for tests
+    without any file I/O.
+    """
+    frames, rows = [], []
+    for fallback_id, df in items:
+        df, qc_row = summarize(df, fallback_id)
+        frames.append(df)
+        rows.append(qc_row)
+    combined = pd.concat(frames, ignore_index=True)
+    return combined, pd.DataFrame(rows)
+
+
+def _load(fp):
+    df = pd.read_csv(fp)
+    if "date" in df.columns:
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.sort_values("date").reset_index(drop=True)
+    return df
+
+
 def main():
     files = sorted(glob.glob(os.path.join(IN_DIR, "*.csv")))
     if not files:
         sys.exit(f"No CSVs found in {IN_DIR}/ — run collector/fetch_uploads.py first.")
 
-    frames, rows = [], []
-    for fp in files:
-        df = pd.read_csv(fp)
-        if "date" in df.columns:
-            df["date"] = pd.to_datetime(df["date"])
-        df = df.sort_values("date").reset_index(drop=True) if "date" in df.columns else df
-
-        pid = first(df, "participant_id", os.path.splitext(os.path.basename(fp))[0])
-        if "participant_id" not in df.columns:
-            df["participant_id"] = pid  # ensure every row is labelled
-        frames.append(df)
-
-        n_cyc, avg_len, pct_logged = cycle_stats(df)
-        contraception = first(df, "contraception")
-        rhr_cov = round(df["resting_hr"].notna().mean() * 100, 1) if "resting_hr" in df.columns else 0.0
-        hormonal = contraception in HORMONAL
-        usable = (not hormonal) and n_cyc >= 2 and rhr_cov > 50
-
-        rows.append({
-            "participant_id": pid,
-            "days": len(df),
-            "cycles": n_cyc,
-            "avg_cycle_len": avg_len,
-            "phase_logged_%": pct_logged,
-            "rhr_coverage_%": rhr_cov,
-            "contraception": contraception,
-            "ovulation_usable": "yes" if usable else "no",
-        })
-
-    combined = pd.concat(frames, ignore_index=True)
-    qc = pd.DataFrame(rows)
+    items = [(os.path.splitext(os.path.basename(fp))[0], _load(fp)) for fp in files]
+    combined, qc = build_combined(items)
 
     print(f"\nCombined {len(files)} participant file(s), {len(combined)} total rows.\n")
     print(qc.to_string(index=False))
