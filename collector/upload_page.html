@@ -110,6 +110,7 @@
       <label class="check"><input type="checkbox" name="conditions" value="PCOS"> PCOS</label>
       <label class="check"><input type="checkbox" name="conditions" value="Endometriosis"> Endometriosis</label>
       <label class="check"><input type="checkbox" name="conditions" value="Thyroid condition"> Thyroid condition</label>
+      <label class="check"><input type="checkbox" name="conditions" value="Other"> Other</label>
       <label class="check"><input type="checkbox" name="conditions" value="None"> None</label>
       <label class="check"><input type="checkbox" name="conditions" value="Prefer not to say"> Prefer not to say</label>
     </div>
@@ -201,7 +202,19 @@
     }
 
     const form = document.getElementById("form");
-    const show = (id, text) => { const el = document.getElementById(id); el.textContent = text; el.hidden = !text; };
+
+    // "None" / "Prefer not to say" can't be combined with anything else.
+    const EXCLUSIVE_CONDITIONS = ["None", "Prefer not to say"];
+    const conditionBoxes = [...form.querySelectorAll('input[name="conditions"]')];
+    conditionBoxes.forEach(box => box.addEventListener("change", () => {
+      if (!box.checked) return;
+      const exclusive = EXCLUSIVE_CONDITIONS.includes(box.value);
+      conditionBoxes.forEach(other => {
+        if (other !== box && (exclusive || EXCLUSIVE_CONDITIONS.includes(other.value))) other.checked = false;
+      });
+    }));
+
+    const show =(id, text) => { const el = document.getElementById(id); el.textContent = text; el.hidden = !text; };
 
     form.addEventListener("submit", async (ev) => {
       ev.preventDefault();
