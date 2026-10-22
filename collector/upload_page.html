@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 560px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    h1 { font-size: 1.4rem; }
+    h2 { font-size: 1.05rem; margin-top: 1.6rem; }
+    .privacy { background: #eef6f0; border-left: 4px solid #0a6; padding: .7rem 1rem; border-radius: 6px; font-size: .9rem; }
+    label { display: block; margin: .9rem 0 .25rem; font-weight: 600; font-size: .9rem; }
+    input, select { width: 100%; padding: .55rem; font-size: 1rem; border: 1px solid #bbb; border-radius: 6px; box-sizing: border-box; }
+    input[type=file] { padding: .4rem; background: #fafafa; }
+    .consent { display: flex; gap: .5rem; align-items: flex-start; margin: 1.2rem 0; font-size: .9rem; }
+    .consent input { width: auto; margin-top: .2rem; }
+    .checks { display: flex; flex-wrap: wrap; gap: .4rem 1rem; margin-top: .3rem; }
+    .check { display: inline-flex; align-items: center; gap: .35rem; font-weight: normal; margin: 0; font-size: .9rem; }
+    .check input { width: auto; }
+    button { width: 100%; padding: .8rem; font-size: 1rem; background: #0a6; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
+    button:disabled { background: #8bb; cursor: default; }
+    .error { background: #fdecea; border-left: 4px solid #c0392b; padding: .6rem 1rem; border-radius: 6px; }
+    .status { background: #f6f6f6; padding: .6rem 1rem; border-radius: 6px; }
+    .done { background: #eef6f0; border-left: 4px solid #0a6; padding: .8rem 1rem; border-radius: 6px; }
+    .pid { font-family: ui-monospace, monospace; font-size: 1.3rem; font-weight: 700; letter-spacing: .05em; }
+    .info { line-height: 1.5; }
+    .info p { margin: .6rem 0; }
+    ol { padding-left: 1.3rem; line-height: 1.6; }
+    details { background: #f6f6f6; border-radius: 6px; padding: .6rem 1rem; margin: 1rem 0; }
+    summary { cursor: pointer; font-weight: 600; }
+    a { color: #075; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <h1>Garmin Cycle Study</h1>
+
+  <div class="info">
+    <p>This study looks at how wearable health signals (heart rate, heart-rate
+    variability, sleep and stress) relate to the menstrual cycle, with the goal of
+    detecting cycle phases and ovulation. To do this I need data from many people, so
+    the patterns reflect real physiology and not just one body.</p>
+
+    <h2>How to take part</h2>
+    <ol>
+      <li>Go to <a href="https://www.garmin.com/account/datamanagement/exportdata/" target="_blank" rel="noopener">Garmin
+        account &rarr; Data Management &rarr; Export Your Data</a> and click <strong>Request Data Export</strong>.</li>
+      <li>Garmin emails you a download link (this can take a few days). Download the <strong>.zip</strong> file —
+        you don't need to open it.</li>
+      <li>Come back to this page, answer the questions below and choose that .zip file.</li>
+    </ol>
+    <p>A computer works best, as the file can be large.</p>
+
+    <p class="privacy"><strong>Your privacy.</strong> Your Garmin file is opened
+    <strong>on your own device</strong>. Only daily health summaries are sent: sleep, heart rate,
+    HRV, stress, body battery, training load, menstrual-cycle and lifestyle logs. Your GPS tracks,
+    activities, profile, contacts and any free-text notes <strong>never leave your device</strong>.
+    No Garmin password is needed. Your data is saved under an <strong>anonymous ID</strong>.</p>
+
+    <details>
+      <summary>Read full information &amp; consent</summary>
+      <p><strong>What happens.</strong> When you submit, this page reads your Garmin export in your
+      browser, keeps only the daily health summary files listed above, removes your Garmin account
+      and device identifiers and any free-text notes, and sends that reduced file to the research
+      team, labelled only with a random ID.</p>
+
+      <p><strong>What we collect.</strong> The daily health summaries above, for the whole period
+      your Garmin account covers, plus the few answers on this page (age range, contraception,
+      cycle regularity, device, conditions). No name, no email and no Garmin login are collected.</p>
+
+      <p><strong>Voluntary &amp; withdrawal.</strong> Taking part is entirely voluntary. At the
+      end you will see an anonymous ID — <strong>keep it</strong>. To withdraw your data later,
+      email that ID to me at <a href="mailto:elsa.lopez-perez@inria.fr">elsa.lopez-perez@inria.fr</a>
+      and I will delete it.</p>
+
+      <p><a href="<?= appUrl ?>?page=privacy" target="_blank" rel="noopener">Read the full privacy policy</a>.</p>
+    </details>
+  </div>
+
+  <form id="form">
+    <label>Age range</label>
+    <select name="age_range" required>
+      <option value="" disabled selected>— select —</option>
+      <option>18–24</option><option>25–34</option><option>35–44</option><option>45+</option>
+    </select>
+
+    <label>Do you use hormonal contraception?</label>
+    <select name="contraception" required>
+      <option value="" disabled selected>— select —</option>
+      <option>None / non-hormonal</option><option>Hormonal pill</option><option>Hormonal IUD</option>
+      <option>Implant / injection / ring</option><option>Prefer not to say</option>
+    </select>
+
+    <label>Are your cycles generally regular?</label>
+    <select name="cycle_regularity">
+      <option value="" selected>— select —</option>
+      <option>Regular</option><option>Irregular</option><option>Not sure</option>
+    </select>
+
+    <label>Garmin device model (optional)</label>
+    <input type="text" name="device_model" placeholder="e.g. Venu 3" maxlength="100">
+
+    <label>Do you usually wear your Garmin while sleeping?</label>
+    <select name="wears_overnight" required>
+      <option value="" disabled selected>— select —</option>
+      <option>Most nights</option><option>Some nights</option><option>Rarely</option>
+    </select>
+
+    <label>Any relevant conditions? (optional, tick any that apply)</label>
+    <div class="checks">
+      <label class="check"><input type="checkbox" name="conditions" value="PCOS"> PCOS</label>
+      <label class="check"><input type="checkbox" name="conditions" value="Endometriosis"> Endometriosis</label>
+      <label class="check"><input type="checkbox" name="conditions" value="Thyroid condition"> Thyroid condition</label>
+      <label class="check"><input type="checkbox" name="conditions" value="None"> None</label>
+      <label class="check"><input type="checkbox" name="conditions" value="Prefer not to say"> Prefer not to say</label>
+    </div>
+
+    <label>Your Garmin export (.zip)</label>
+    <input type="file" name="export" accept=".zip,application/zip" required>
+
+    <div class="consent">
+      <input type="checkbox" name="consent" id="consent" required>
+      <label for="consent" style="font-weight: normal; margin: 0;">I have read the information
+        above and the <a href="<?= appUrl ?>?page=privacy" target="_blank" rel="noopener">privacy policy</a>,
+        and consent to take part.</label>
+    </div>
+
+    <p id="error" class="error" hidden></p>
+    <p id="status" class="status" hidden></p>
+    <button type="submit" id="submit">Send my data</button>
+  </form>
+
+  <div id="done" class="done" hidden>
+    <p><strong>Thank you — your data was received.</strong></p>
+    <p>Your anonymous ID is <span id="pid" class="pid"></span></p>
+    <p>Please write it down: it is the only way to ask for your data to be deleted later.</p>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@zip.js/zip.js@2.7.52/dist/zip-full.min.js"></script>
+  <script>
+    // Files kept from the Garmin export. Keep in sync with EXPORT_FILES in
+    // collector/garmin_export.py and upload_endpoint.gs.
+    const EXPORT_FILES = [
+      /DI-Connect-Aggregator\/UDSFile_[^/]*\.json$/,
+      /DI-Connect-Wellness\/[^/]*_sleepData\.json$/,
+      /DI-Connect-Wellness\/[^/]*_healthStatusData\.json$/,
+      /DI-Connect-Wellness\/[^/]*_MenstrualCycles\.json$/,
+      /DI-Connect-Wellness\/[^/]*_DailyMenstrualLogs\.json$/,
+      /DI-Connect-Wellness\/[^/]*_LifestyleLogging\.json$/,
+      /DI-Connect-Metrics\/MetricsAcuteTrainingLoad_[^/]*\.json$/,
+      /DI-Connect-Metrics\/TrainingHistory_[^/]*\.json$/,
+      /DI-Connect-Metrics\/MetricsMaxMetData_[^/]*\.json$/,
+      /DI-Connect-Metrics\/MetricsHeatAltitudeAcclimation_[^/]*\.json$/,
+    ];
+    // Identifiers and free text removed from every kept record before upload.
+    const DROP_KEYS = new Set(["userProfilePK", "userProfilePk", "deviceId", "uuid",
+                               "activityId", "activityUuid", "notes"]);
+
+    // Read the participant's export zip (lazily — only the needed entries are
+    // decompressed) and return a small zip with the kept, de-identified files.
+    async function extractNeeded(file) {
+      zip.configure({ useWebWorkers: false });
+      const reader = new zip.ZipReader(new zip.BlobReader(file));
+      const kept = [];
+      let accountId = null;
+      try {
+        for (const entry of await reader.getEntries()) {
+          if (entry.directory || !EXPORT_FILES.some(re => re.test(entry.filename))) continue;
+          const data = JSON.parse(await entry.getData(new zip.TextWriter()), (key, value) => {
+            if (key === "userProfilePK" || key === "userProfilePk") accountId = accountId || String(value);
+            return DROP_KEYS.has(key) ? undefined : value;
+          });
+          const start = entry.filename.indexOf("DI_CONNECT/");
+          kept.push({ name: start >= 0 ? entry.filename.slice(start) : entry.filename, data });
+        }
+      } finally {
+        await reader.close();
+      }
+      if (!kept.length) return null;
+
+      const writer = new zip.ZipWriter(new zip.BlobWriter("application/zip"));
+      for (const { name, data } of kept) {
+        // Garmin puts the account number in some file names; replace it.
+        const safeName = accountId ? name.split(accountId).join("p") : name;
+        await writer.add(safeName, new zip.TextReader(JSON.stringify(data)));
+      }
+      return { blob: await writer.close(), count: kept.length };
+    }
+
+    function toBase64(blob) {
+      return new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result.split(",", 2)[1]);
+        fr.onerror = () => reject(fr.error);
+        fr.readAsDataURL(blob);
+      });
+    }
+
+    function submitExport(meta, data) {
+      return new Promise((resolve, reject) =>
+        google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).submitExport(meta, data));
+    }
+
+    const form = document.getElementById("form");
+    const show = (id, text) => { const el = document.getElementById(id); el.textContent = text; el.hidden = !text; };
+
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      show("error", "");
+      const button = document.getElementById("submit");
+      button.disabled = true;
+      try {
+        const fd = new FormData(form);
+        const meta = {
+          age_range: fd.get("age_range"), contraception: fd.get("contraception"),
+          cycle_regularity: fd.get("cycle_regularity"), device_model: fd.get("device_model").trim(),
+          wears_overnight: fd.get("wears_overnight"), conditions: fd.getAll("conditions").join("; "),
+          consent: fd.get("consent") === "on",
+        };
+        show("status", "Reading your Garmin export on this device…");
+        let result;
+        try {
+          result = await extractNeeded(fd.get("export"));
+        } catch (err) {
+          result = null;
+        }
+        if (!result) {
+          throw new Error("This doesn't look like a Garmin data export. Please choose the .zip file " +
+                          "downloaded from Garmin's email, without unzipping it.");
+        }
+        show("status", `Sending ${result.count} health summary files (${(result.blob.size / 1e6).toFixed(1)} MB)…`);
+        const pid = await submitExport(meta, await toBase64(result.blob));
+        form.hidden = true;
+        document.getElementById("pid").textContent = pid;
+        document.getElementById("done").hidden = false;
+      } catch (err) {
+        show("status", "");
+        show("error", (err && err.message) || String(err));
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

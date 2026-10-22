@@ -1,5 +1,11 @@
 """
-Download all collected participant CSVs from the Drive folder to a local folder.
+Download all collected participant data from the Drive folder to a local folder.
+
+CSVs (server / desktop collector) are saved as-is. Export uploads from the
+participant page (garmin_export_<id>.zip) are kept raw in data/participant_exports/
+and converted to garmin_data_<id>.csv next to the other CSVs, so they can be
+re-parsed later (e.g. after adding metrics to garmin_export.py) with:
+    python collector/garmin_export.py data/participant_exports/garmin_export_<id>.zip out.csv
 
 Reuses the same Apps Script endpoint + token as the uploader (via the doGet added
 to upload_endpoint.gs). No Google Cloud project or OAuth needed.
@@ -23,6 +29,8 @@ from pathlib import Path
 
 import requests
 
+import garmin_export
+
 
 def load_env(path=None):
     """Load KEY=VALUE lines from a .env file (repo root) into os.environ.
@@ -42,6 +50,7 @@ load_env()
 ENDPOINT_URL = os.environ.get("GARMIN_ENDPOINT_URL")
 UPLOAD_TOKEN = os.environ.get("GARMIN_UPLOAD_TOKEN")
 OUT_DIR = sys.argv[1] if len(sys.argv) > 1 else "data/participants"
+EXPORTS_DIR = "data/participant_exports"
 
 
 def main():
@@ -66,10 +75,24 @@ def main():
         return
 
     for f in files:
-        path = os.path.join(OUT_DIR, f["name"])
-        with open(path, "wb") as fh:
+        if not f["name"].endswith(".zip"):
+            path = os.path.join(OUT_DIR, f["name"])
+            with open(path, "wb") as fh:
+                fh.write(base64.b64decode(f["data"]))
+            print(f"  ✓ {f['name']}")
+            continue
+        os.makedirs(EXPORTS_DIR, exist_ok=True)
+        zip_path = os.path.join(EXPORTS_DIR, f["name"])
+        with open(zip_path, "wb") as fh:
             fh.write(base64.b64decode(f["data"]))
-        print(f"  ✓ {f['name']}")
+        try:
+            df = garmin_export.participant_dataframe(zip_path)
+        except Exception as e:  # noqa: BLE001 — one bad upload shouldn't stop the sync
+            print(f"  ✗ {f['name']}: {e}")
+            continue
+        csv_name = f"garmin_data_{df['participant_id'].iloc[0]}.csv"
+        df.to_csv(os.path.join(OUT_DIR, csv_name), index=False)
+        print(f"  ✓ {f['name']} -> {csv_name} ({len(df)} days)")
 
     print(f"\n✅ Downloaded {len(files)} file(s) to {OUT_DIR}/")
 

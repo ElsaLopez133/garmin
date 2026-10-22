@@ -26,3 +26,5 @@ collector/GOOGLE_FORM.md
 collector/desktop/BUILD.md
 collector/desktop/PARTICIPANT_GUIDE.md
 collector/server/README.md
+personal/garmin_export
+collector/server/AppScriptGoogleValues.txt
