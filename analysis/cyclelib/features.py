@@ -41,8 +41,9 @@ def standardize_per_group(df, signals, group_cols, out_prefix="z_"):
     df = df.copy()
     for s in signals:
         df[f"{out_prefix}{s}"] = np.nan
-    for _, idx in df.groupby(group_cols, sort=False).groups.items():
-        block = df.loc[idx, signals].interpolate(limit_direction="both")
+    for _, group in df.groupby(group_cols, sort=False):
+        idx = group.index
+        block = group[signals].interpolate(limit_direction="both")
         med = block.median()
         mad = ((block - med).abs().median() * MAD_SCALE).replace(0, 1.0)
         for s in signals:

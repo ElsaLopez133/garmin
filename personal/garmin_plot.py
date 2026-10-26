@@ -4,7 +4,6 @@ import sys
 from pathlib import Path
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-from matplotlib.patches import Patch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -65,7 +64,6 @@ plt.grid(alpha=0.3)
 plt.tight_layout()
 plt.savefig(f"{OUTPUT_DIR}/hrv_plot.jpg")
 plt.close()
-#plt.show()
 
 
 # ---- Resting Heart Rate ----
@@ -80,7 +78,6 @@ plt.grid(alpha=0.3)
 plt.tight_layout()
 plt.savefig(f"{OUTPUT_DIR}/rhr_plot.jpg")
 plt.close()
-#plt.show()
 
 # ---- HRV and RHR ----
 print("\n📈 Plotting HRV/RHR data...")
@@ -166,7 +163,6 @@ plt.xticks(rotation=45)
 plt.tight_layout()
 plt.savefig(f"{OUTPUT_DIR}/sleep_plot.jpg")
 plt.close()
-#plt.show()
 
 
 # ---- Combined ----
@@ -218,9 +214,8 @@ plt.grid(alpha=0.3)
 plt.tight_layout()
 plt.savefig(f"{OUTPUT_DIR}/combined_plot.png")
 plt.close()
-#plt.show()
 
- #---- Training load ----
+# ---- Training load ----
 print("\n📈 Plotting training load data...")
 
 plt.figure(figsize=(12,6))
@@ -237,7 +232,7 @@ base_colors = {
 }
 
 # Custom legend for phases
-phase_patches = [Patch(color=color, label=phase) for phase, color in base_colors.items()]
+phase_patches = [mpatches.Patch(color=color, label=phase) for phase, color in base_colors.items()]
 df["feedback"] = df["feedback"].str.split("_").str[0]
 df["color"] = df["feedback"].map(base_colors)
 # Fill any missing colors with a default
@@ -261,12 +256,6 @@ plt.plot(df["date"], df["dailyTrainingLoadChronic"],
 # Plot acute load (recent)
 plt.plot(df["date"], df["dailyTrainingLoadAcute"], 
          label="Acute (recent)", color="red", linewidth=1, linestyle="dashed")
-
-# # Shade ACWR zones
-# plt.fill_between(df["date"],
-#                  df["dailyTrainingLoadChronic"]*ACWR_optimal[0],
-#                  df["dailyTrainingLoadChronic"]*ACWR_optimal[1],
-#                  color="green", alpha=0.2, label="Optimal ACWR (0.8–1.3)")
 
 # Handles for chronic and acute lines
 chronic_line = plt.Line2D([0], [0], color="blue", linewidth=2, label="Chronic (long-term)")
