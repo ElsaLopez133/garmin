@@ -80,20 +80,6 @@ OVERNIGHT_OPTIONS = ["Most nights", "Some nights", "Rarely"]
 CONDITION_OPTIONS = ["PCOS", "Endometriosis", "Thyroid condition", "None", "Prefer not to say"]
 
 
-def _ensure_display_name(api):
-    """garminconnect's return_on_mfa login path can return before loading the profile,
-    leaving api.display_name = None — which breaks every endpoint whose URL contains it
-    (resting HR, sleep, ...) with a 403 on '.../None'. Populate it if missing."""
-    if getattr(api, "display_name", None):
-        return
-    # garth.profile lazily loads /userprofile-service/socialProfile and caches it
-    # (this is the same source garminconnect's own login uses).
-    profile = api.garth.profile
-    if isinstance(profile, dict):
-        api.display_name = profile.get("displayName")
-        api.full_name = profile.get("fullName")
-
-
 def _start_download_job(api, days, meta):
     job_id = uuid.uuid4().hex
     JOBS[job_id] = {"status": "Starting…", "done": False, "error": None,
@@ -101,7 +87,6 @@ def _start_download_job(api, days, meta):
 
     def run():
         try:
-            _ensure_display_name(api)
             df = garmin_fetch.download_dataframe(
                 api, days, status=lambda m: JOBS[job_id].update(status=m))
             for key, value in meta.items():

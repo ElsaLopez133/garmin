@@ -114,23 +114,17 @@ def login_with_retry(api, max_attempts=5, base_delay=15):
 
 
 def verify_login(api):
-    """Confirm the session is genuinely authenticated, else raise GarminLoginError.
+    """Confirm the session loaded the user's profile, else raise GarminLoginError.
 
-    garth/garminconnect can hand back a session that *looks* usable even when the
-    credentials were wrong, instead of raising — so the caller would otherwise grind
-    through a full, empty download before failing. One cheap authenticated call
-    (``get_full_name``) makes a bad login fail fast with a clear message. Rate-limit
-    errors are re-raised untouched so callers can back off.
+    login() / resume_login() fetch the Garmin profile, whose ``display_name`` goes
+    into the URL of every per-user endpoint (resting HR, sleep, ...). resume_login()
+    (the MFA path) only logs a failed profile fetch, so check it here and fail fast
+    instead of grinding through a download of errors. ``full_name`` is not used: it
+    is legitimately empty for accounts without a name set.
     """
-    try:
-        name = api.get_full_name()
-    except Exception as exc:
-        if _is_rate_limit_error(exc):
-            raise
-        raise GarminLoginError("Login failed — please check your email and password.") from exc
-    if not name:
+    if not getattr(api, "display_name", None):
         raise GarminLoginError("Login failed — please check your email and password.")
-    return name
+    return api.display_name
 
 
 def _fetch_hrv(api, date_list):
