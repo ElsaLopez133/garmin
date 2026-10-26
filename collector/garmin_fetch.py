@@ -9,7 +9,6 @@ lives in one place.
 import os
 import time
 from datetime import date, datetime, timedelta
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -19,7 +18,6 @@ ALL_METRICS = ["hrv", "rhr", "sleep", "cycle", "stress", "body_battery", "traini
 MINIMAL_METRICS = ["hrv", "rhr", "sleep", "cycle"]
 
 CALL_DELAY = float(os.environ.get("GARMIN_CALL_DELAY", "0.25"))
-DEFAULT_TOKENSTORE = Path(__file__).resolve().parents[1] / ".garmin_tokens"
 
 
 def _pace():
@@ -97,14 +95,15 @@ def _is_rate_limit_error(exc):
     return False
 
 
-def login_with_retry(api, max_attempts=5, base_delay=15, tokenstore=None):
-    """Log in with cached tokens, retrying when Garmin rate-limits auth."""
-    tokenstore = Path(os.environ.get("GARMINTOKENS", tokenstore or DEFAULT_TOKENSTORE))
-    tokenstore.mkdir(parents=True, exist_ok=True)
+def login_with_retry(api, max_attempts=5, base_delay=15):
+    """Log in with the api's credentials, retrying when Garmin rate-limits auth.
 
+    No token cache on purpose: a cached session would be used instead of the
+    credentials typed in (wrong account), and would leave a live Garmin token on disk.
+    """
     for attempt in range(1, max_attempts + 1):
         try:
-            api.login(tokenstore=str(tokenstore))
+            api.login()
             return
         except Exception as exc:
             if not (isinstance(exc, GarminConnectTooManyRequestsError) or _is_rate_limit_error(exc)):

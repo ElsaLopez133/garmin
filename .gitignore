@@ -8,7 +8,6 @@ temp/
 .venv/
 __pycache__/
 *.env
-.garmin_tokens/
 .idea/
 
 # Build artifacts
