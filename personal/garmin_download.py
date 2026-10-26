@@ -1,5 +1,4 @@
 import getpass
-import json
 import os
 import sys
 from pathlib import Path
@@ -29,20 +28,6 @@ def prompt_mfa():
     return input("MFA code: ").strip()
 
 
-def save_cycle_json(df, output_dir):
-    cycle_cols = ["date", "is_period", "garmin_predicted_fertile"]
-    existing_cols = [c for c in cycle_cols if c in df.columns]
-    if not existing_cols:
-        return
-
-    cycle_rows = df[existing_cols].copy()
-    if "date" in cycle_rows.columns:
-        cycle_rows["date"] = cycle_rows["date"].astype(str)
-
-    with open(output_dir / "cycle_data.json", "w") as f:
-        json.dump(cycle_rows.to_dict(orient="records"), f, indent=2)
-
-
 def main():
     email = input("Email: ")
     password = getpass.getpass("Password: ")
@@ -66,7 +51,6 @@ def main():
 
     csv_path = output_dir / f"garmin_data_{days_back}days.csv"
     df.to_csv(csv_path, index=False)
-    save_cycle_json(df, output_dir)
 
     print(f"\nDone. Saved to {csv_path}")
 

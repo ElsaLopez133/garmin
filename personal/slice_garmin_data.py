@@ -1,5 +1,4 @@
 import argparse
-import json
 from pathlib import Path
 
 import pandas as pd
@@ -41,18 +40,6 @@ def source_csv_path(source_days, source_csv):
     return DATA_ROOT / f"garmin_data_{source_days}days" / f"garmin_data_{source_days}days.csv"
 
 
-def save_cycle_json(df, output_dir):
-    cycle_cols = ["date", "is_period", "garmin_predicted_fertile"]
-    existing_cols = [c for c in cycle_cols if c in df.columns]
-    if not existing_cols:
-        return
-
-    cycle_rows = df[existing_cols].copy()
-    cycle_rows["date"] = cycle_rows["date"].astype(str)
-    with open(output_dir / "cycle_data.json", "w") as f:
-        json.dump(cycle_rows.to_dict(orient="records"), f, indent=2)
-
-
 def main():
     args = parse_args()
     source_csv = source_csv_path(args.source_days, args.source_csv)
@@ -83,7 +70,6 @@ def main():
         output_dir.mkdir(parents=True, exist_ok=True)
         output_csv = output_dir / f"garmin_data_{days}days.csv"
         out.to_csv(output_csv, index=False)
-        save_cycle_json(out, output_dir)
 
         print(
             f"Wrote {len(out):>4} rows for {days:>4} days: "

@@ -9,6 +9,7 @@ lives in one place.
 import os
 import time
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -24,6 +25,25 @@ def _pace():
     """Small pause between Garmin API calls to avoid bursting"""
     if CALL_DELAY > 0:
         time.sleep(CALL_DELAY)
+
+
+def load_dotenv():
+    """Populate os.environ from a .env in the current folder or the repo root (local dev).
+
+    Minimal KEY=VALUE parser, so the desktop build doesn't need python-dotenv. Existing
+    env vars win; a missing file is fine (e.g. in the frozen desktop app).
+    """
+    for path in (Path.cwd() / ".env", Path(__file__).resolve().parents[1] / ".env"):
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
 
 
 def fetch_menstrual_calendar(api, start_date, end_date):

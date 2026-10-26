@@ -45,26 +45,7 @@ DEFAULT_DAYS = 365
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
-def _load_dotenv():
-    """Populate os.environ from a repo-root .env, for local dev only.
-
-    Minimal KEY=VALUE parser (no python-dotenv dependency, so it doesn't bloat the
-    built app). Existing env vars win; a missing file is fine. In the frozen app
-    there is no .env, so this is a no-op there.
-    """
-    for path in (Path.cwd() / ".env", Path(__file__).resolve().parents[2] / ".env"):
-        try:
-            for line in path.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, _, val = line.partition("=")
-                os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
-        except OSError:
-            pass
-
-
-_load_dotenv()
+garmin_fetch.load_dotenv()
 # Environment / .env overrides the source values when set (local dev); otherwise
 # the baked-in constants above are used (the distributed app).
 ENDPOINT_URL = os.environ.get("GARMIN_ENDPOINT_URL") or ENDPOINT_URL

@@ -27,28 +27,14 @@ run retries it.
 import base64
 import os
 import sys
-from pathlib import Path
 
 import requests
 
 import garmin_export
+import garmin_fetch
 
 
-def load_env(path=None):
-    """Load KEY=VALUE lines from a .env file (repo root) into os.environ.
-    Real environment variables take precedence (setdefault)."""
-    path = Path(path) if path else Path(__file__).resolve().parents[1] / ".env"
-    if not path.exists():
-        return
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, val = line.partition("=")
-        os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
-
-
-load_env()
+garmin_fetch.load_dotenv()
 ENDPOINT_URL = os.environ.get("GARMIN_ENDPOINT_URL")
 UPLOAD_TOKEN = os.environ.get("GARMIN_UPLOAD_TOKEN")
 OUT_DIR = sys.argv[1] if len(sys.argv) > 1 else "data/participants"
