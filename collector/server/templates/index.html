@@ -117,5 +117,19 @@
 
     <button type="submit">Download &amp; send my data</button>
   </form>
+
+  <script>
+    // "None" / "Prefer not to say" can't be combined with anything else
+    // (same rule as upload_page.html and the desktop app).
+    const EXCLUSIVE_CONDITIONS = ["None", "Prefer not to say"];
+    const conditionBoxes = [...document.querySelectorAll('input[name="conditions"]')];
+    conditionBoxes.forEach(box => box.addEventListener("change", () => {
+      if (!box.checked) return;
+      const exclusive = EXCLUSIVE_CONDITIONS.includes(box.value);
+      conditionBoxes.forEach(other => {
+        if (other !== box && (exclusive || EXCLUSIVE_CONDITIONS.includes(other.value))) other.checked = false;
+      });
+    }));
+  </script>
 </body>
 </html>

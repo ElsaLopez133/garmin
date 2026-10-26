@@ -78,7 +78,7 @@ CONTRACEPTION_OPTIONS = ["None / non-hormonal", "Hormonal pill", "Hormonal IUD",
                          "Implant / injection / ring", "Prefer not to say"]
 REGULARITY_OPTIONS = ["Regular", "Irregular", "Not sure"]
 OVERNIGHT_OPTIONS = ["Most nights", "Some nights", "Rarely"]
-CONDITION_OPTIONS = ["PCOS", "Endometriosis", "Thyroid condition", "None", "Prefer not to say"]
+CONDITION_OPTIONS = ["PCOS", "Endometriosis", "Thyroid condition", "Other", "None", "Prefer not to say"]
 
 
 def _start_download_job(api, days, meta):
