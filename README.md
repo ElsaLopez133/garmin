@@ -5,7 +5,7 @@ Download Garmin health data (HRV, resting heart rate, sleep, stress, body batter
 The project has three parts:
 
 1. **`personal/`** — download and explore *your own* Garmin data.
-2. **`collector/`** — gather data from *other consenting participants* (desktop app **or** web server), so models generalize beyond one person.
+2. **`collector/`** — gather data from *other consenting participants* (Garmin data-export upload, web server, or desktop app), so models generalize beyond one person.
 3. **`analysis/`** — verify the data and run the cycle/ovulation analysis + ML pipeline.
 
 ---
@@ -13,7 +13,10 @@ The project has three parts:
 ## Repository structure
 
 ```
-personal/      garmin_download.py, garmin_explore_metrics.py, garmin_plot.py
+personal/      garmin_download.py         download your own data -> data/garmin_data_{N}days/
+               garmin_plot.py             plot it -> figs/
+               garmin_explore_metrics.py  dump the API response structure
+               slice_garmin_data.py       cut shorter-window CSVs out of a long one
 preprocessing/ cycle_phases.py            derive Early-follicular / Late-luteal anchors
                outliers.py                flag confounded days (illness / alcohol / travel)
 analysis/      01_discovery.ipynb         is the follicular→luteal shift detectable? (baseline)
@@ -23,11 +26,15 @@ analysis/      01_discovery.ipynb         is the follicular→luteal shift detec
                cyclelib/                  shared model library (hsmm, emissions, features, truth)
                theory/                    HTML companion docs (design plan, HSMM maths)
                garmin_cycle_check.py, garmin_ovulation_check.py, combine_participants.py
-collector/     garmin_fetch.py            shared download engine
-               fetch_uploads.py           pull collected CSVs from Drive
-               upload_endpoint.gs         Google Apps Script (Drive endpoint)
-               desktop/                   tkinter double-click app + build docs
-               server/                    FastAPI web app (deployed) + templates
+collector/     garmin_fetch.py            shared download engine (API flows)
+               garmin_export.py           Garmin "Export Your Data" archive -> study CSV
+               fetch_uploads.py           sync uploads from Drive -> data/participants/
+               upload_endpoint.gs         Google Apps Script (upload page + Drive endpoint)
+               upload_page.html           participant upload page (served by the Apps Script)
+               privacy_page.html          its privacy policy page
+               desktop/                   tkinter double-click app
+               server/                    FastAPI web app (deployed on Render) + templates
+tests/         pytest suite (cyclelib, combine_participants, garmin_export)
 data/  figs/   outputs (gitignored)
 ```
 
@@ -38,14 +45,17 @@ data/  figs/   outputs (gitignored)
 Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-uv sync --all-extras          # full env (adds the server + analysis extras)
+uv sync --all-extras          # full env: core + server + analysis + dev extras
+uv run pytest                 # run the tests
 ```
 
-Dependencies are defined in `pyproject.toml`: a shared core plus `[server]` and
-`[analysis]` optional groups. Plain `uv sync` installs only the core (download +
-collector); use `--all-extras`, or a single group like `--extra analysis`, for the rest.
+Dependencies are defined in `pyproject.toml`: a shared core plus `[server]`, `[analysis]`
+and `[dev]` optional groups, with exact versions locked in `uv.lock`. Plain `uv sync`
+installs only the core (download + collector); use `--all-extras`, or a single group like
+`--extra analysis`, for the rest. Render installs the server with `pip install .[server]`.
 
-Run all scripts **from the repo root** so relative `data/`/`figs/` paths resolve.
+Run scripts **from the repo root** so relative `data/`/`figs/` paths resolve. The
+notebooks locate `data/` themselves and run from any directory.
 
 ---
 
@@ -55,28 +65,46 @@ Run all scripts **from the repo root** so relative `data/`/`figs/` paths resolve
 uv run python personal/garmin_download.py        # prompts: email, password, number of days
 uv run python personal/garmin_plot.py            # prompts: number of days (data must exist)
 uv run python personal/garmin_explore_metrics.py # explore the API response structure
+uv run python personal/slice_garmin_data.py      # 60/90/180/365-day CSVs from the 730-day one
 ```
 
-`garmin_download.py` saves per-metric JSON + a merged CSV to `data/garmin_data_{N}days/`. Credentials are entered at runtime, never stored.
+`garmin_download.py` saves a merged CSV to `data/garmin_data_{N}days/`. Credentials are
+entered at runtime and never stored (no login token is cached either).
 
 ---
 
 ## 2. Collecting from participants (`collector/`)
 
-Two front-ends, sharing one download engine (`garmin_fetch.py`), so the CSV is identical:
+Three ways to take part. All of them ask the same consent and questionnaire (age range,
+contraception, cycle regularity, device, overnight wear, conditions), give the participant a
+random ID, and store the result in a **Google Drive folder** through the Apps Script in
+`upload_endpoint.gs`:
 
-- **Desktop app** (`collector/desktop/`): a double-click app participants run locally; their password never leaves their machine. Built per-OS with PyInstaller (or via the GitHub Actions workflow). See `collector/desktop/BUILD.md`.
-- **Web server** (`collector/server/`): a FastAPI page participants open in any browser (phone, laptop, any OS). Deployed on Render. See `collector/server/README.md`.
+- **Garmin export upload** (no password): the participant requests Garmin's *Export Your
+  Data* archive and uploads the zip on the Apps Script web page (`upload_page.html`). Their
+  browser keeps only the daily health-summary files, strips account/device IDs and free-text
+  notes, and sends that reduced zip. `garmin_export.py` turns it into the study CSV (with many
+  more daily metrics than the API flows).
+- **Web server** (`collector/server/`): a FastAPI page, deployed on Render, where the
+  participant signs in with their Garmin login; the password is used only in memory. Downloads
+  HRV, resting HR, sleep and cycle data via `garmin_fetch.py`.
+- **Desktop app** (`collector/desktop/`): the same download, run on the participant's own
+  computer so the password never leaves it. Built per-OS by the GitHub Actions workflow.
 
-Both write a CSV (with consent + metadata columns) to a **Google Drive folder** via the Apps Script in `upload_endpoint.gs`.
+The Apps Script is not deployed from this repo: paste `upload_endpoint.gs` and the two HTML
+files into the script project and deploy a new version (setup steps are at the top of the
+`.gs` file).
 
 ### Retrieving the collected data
 
 Set your endpoint + token once in a `.env` file (copy `.env.example` → `.env`), then:
 
 ```bash
-uv run python collector/fetch_uploads.py     # download all participant CSVs -> data/participants/
+uv run python collector/fetch_uploads.py     # sync new uploads -> data/participants/
 ```
+
+It downloads only uploads you don't have yet. Export zips are kept in
+`data/participant_exports/` and converted to `garmin_data_<id>.csv` next to the other CSVs.
 
 ---
 
@@ -96,7 +124,7 @@ stay decoupled and the modelling choices below are tunable in one place.
   robust **Mahalanobis distance** that catches the multi-signal illness signature. It
   adds `is_confounded` / `confound_score`; `apply_confound_mask` then NaNs those days'
   signals so downstream median imputation absorbs them (flag, don't delete). The
-  threshold is picked empirically in the transition notebook's masking sweep (Step B).
+  threshold is picked empirically in the masking sweep of `01_discovery.ipynb` (Step B).
 
 ```bash
 uv run python preprocessing/cycle_phases.py data/…/….csv -a 5      # add anchor labels
@@ -156,14 +184,18 @@ hormonal ground truth).
 ## Data flow
 
 ```
-personal/garmin_download.py ─┐
-collector (app / server) ────┼─> CSVs (data/, Drive)
-                             │
-fetch_uploads.py ────────────┘-> data/participants/
-combine_participants.py ───────-> data/combined/  ─┐
-                                                    ├─> preprocessing/ (phase anchors,
-                                                    │     confounder masking)
-                                                    └─> analysis notebooks 01–04 (via cyclelib/)
+your own data:
+  personal/garmin_download.py ──> data/garmin_data_{N}days/ ──────────┐
+                                                                      │
+participants:                                                         │
+  export upload / server / desktop ──> Google Drive                   │
+  fetch_uploads.py (+ garmin_export.py) ──> data/participants/        │
+  combine_participants.py ──> data/combined/ ─────────────────────────┤
+                                                                      ▼
+                         preprocessing/ (phase anchors, confounder masking)
+                                                                      │
+                                                                      ▼
+                         analysis notebooks 01–04 (via cyclelib/)
 ```
 
 ---
