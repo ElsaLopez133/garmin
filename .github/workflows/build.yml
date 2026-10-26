@@ -28,9 +28,9 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        # Pins match pyproject.toml / collector/server so the desktop app,
-        # server, and analysis env all use the same Garmin auth stack.
-        run: pip install garminconnect==0.3.6 garth==0.8.0 pandas numpy requests pyinstaller
+        # garminconnect pin matches pyproject.toml, so the desktop app uses the
+        # same Garmin login code as the server and the personal scripts.
+        run: pip install garminconnect==0.3.6 pandas numpy requests pyinstaller
 
       - name: Inject endpoint config from secrets
         # Replaces the PASTE_* placeholders in the source with the repo secrets,

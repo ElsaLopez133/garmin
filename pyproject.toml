@@ -6,8 +6,7 @@ requires-python = ">=3.10"
 # Shared core — the download engine (collector/garmin_fetch.py), the collector
 # front-ends, and the personal scripts all need these.
 dependencies = [
-    "garminconnect==0.3.6",
-    "garth==0.8.0",
+    "garminconnect==0.3.6",   # pinned: login/MFA internals change between releases
     "pandas",
     "numpy",
     "requests",
@@ -15,7 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # The deployed FastAPI web collector. Render installs this with `pip install .[server]`
-# (base + these), which reproduces the old collector/server/requirements.txt exactly.
+# (base + these).
 server = [
     "fastapi",
     "uvicorn[standard]",
@@ -26,9 +25,9 @@ server = [
 analysis = [
     "tqdm",
     "matplotlib",
-    "seaborn",
     "scipy",
     "scikit-learn",
+    "jupyter",   # run the analysis/*.ipynb notebooks in this env
 ]
 # Test + notebook-hygiene tooling. Not needed at runtime or on Render.
 dev = [
