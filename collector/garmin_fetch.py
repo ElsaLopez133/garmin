@@ -175,11 +175,13 @@ def _fetch_sleep(api, date_list):
         try:
             data = api.get_sleep_data(d.isoformat())
             if not data or "dailySleepDTO" not in data:
-                sleep_list.append({"date": d.isoformat(), "total_sleep_hr": 0, "deep_sleep_hr": 0,
-                                   "light_sleep_hr": 0, "rem_sleep_hr": 0, "awake_sleep_hr": 0,
-                                   "avg_sleep_hr": 0, "avg_sleep_respiration": 0, "avg_sleep_stress": 0,
-                                   "sleep_score": 0, "sleep_quality": None, "sleep_feedback": None,
-                                   "sleep_need_baseline": 0, "sleep_need_actual": 0, "sleep_need_feedback": None})
+                # Missing night = None (NaN), never 0: a 0 would pass as a real reading.
+                sleep_list.append({"date": d.isoformat(), "total_sleep_hr": None, "deep_sleep_hr": None,
+                                   "light_sleep_hr": None, "rem_sleep_hr": None, "awake_sleep_hr": None,
+                                   "avg_sleep_hr": None, "avg_sleep_respiration": None, "avg_sleep_stress": None,
+                                   "sleep_score": None, "sleep_quality": None, "sleep_feedback": None,
+                                   "sleep_need_baseline": None, "sleep_need_actual": None,
+                                   "sleep_need_feedback": None})
                 continue
             s = data["dailySleepDTO"]
             sleep_list.append({
