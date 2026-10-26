@@ -370,9 +370,8 @@ def download_dataframe(api, days_back, status=lambda m: None, metrics=None, prog
     df_all = pd.concat(dfs.values(), axis=1).sort_index().reset_index()
 
     if "baseline" in df_all.columns:
-        expanded = (df_all["baseline"].dropna()
-                    .apply(lambda x: eval(x) if isinstance(x, str) else x)
-                    .apply(pd.Series).add_prefix("baseline_"))
+        # The API returns baseline as a dict ({balancedLow, balancedUpper, ...}).
+        expanded = df_all["baseline"].dropna().apply(pd.Series).add_prefix("baseline_")
         df_all = pd.concat([df_all.drop(columns=["baseline"]), expanded], axis=1)
 
     return df_all
