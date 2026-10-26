@@ -95,13 +95,17 @@ AGE_OPTIONS = ["— select —", "18–24", "25–34", "35–44", "45+"]
 CONTRACEPTION_OPTIONS = ["— select —", "None / non-hormonal", "Hormonal pill",
                          "Hormonal IUD", "Implant / injection / ring", "Prefer not to say"]
 REGULARITY_OPTIONS = ["— select —", "Regular", "Irregular", "Not sure"]
+OVERNIGHT_OPTIONS = ["— select —", "Most nights", "Some nights", "Rarely"]
+# Same choices as upload_page.html; "None" / "Prefer not to say" can't be combined.
+CONDITION_OPTIONS = ["PCOS", "Endometriosis", "Thyroid condition", "Other", "None", "Prefer not to say"]
+EXCLUSIVE_CONDITIONS = {"None", "Prefer not to say"}
 
 
 class CollectorApp:
     def __init__(self, root):
         self.root = root
         root.title("Garmin Health Data Collector")
-        root.geometry("470x590")
+        root.geometry("470x640")
         root.resizable(False, False)
 
         self.participant_id = uuid.uuid4().hex[:8]
@@ -141,6 +145,20 @@ class CollectorApp:
         self.device = tk.Entry(form, width=28)
         self.device.grid(row=5, column=1, **pad)
 
+        tk.Label(form, text="Wear it while sleeping?").grid(row=6, column=0, sticky="e", **pad)
+        self.overnight = tk.StringVar(value=OVERNIGHT_OPTIONS[0])
+        tk.OptionMenu(form, self.overnight, *OVERNIGHT_OPTIONS).grid(row=6, column=1, sticky="ew", **pad)
+
+        tk.Label(form, text="Conditions (optional):").grid(row=7, column=0, sticky="ne", **pad)
+        checks = tk.Frame(form)
+        checks.grid(row=7, column=1, sticky="w", **pad)
+        self.conditions = {}
+        for i, cond in enumerate(CONDITION_OPTIONS):
+            var = tk.IntVar()
+            tk.Checkbutton(checks, text=cond, variable=var,
+                           command=lambda c=cond: self.on_condition(c)).grid(row=i // 2, column=i % 2, sticky="w")
+            self.conditions[cond] = var
+
         tk.Label(root, text=f"Your anonymous ID: {self.participant_id}", fg="#555").pack(pady=(4, 0))
 
         self.consent = tk.IntVar()
@@ -155,6 +173,14 @@ class CollectorApp:
 
         self.progress = ttk.Progressbar(root, length=420, mode="determinate")
         self.progress.pack(pady=(0, 10))
+
+    def on_condition(self, cond):
+        """Ticking "None" / "Prefer not to say" clears the rest, and vice versa."""
+        if not self.conditions[cond].get():
+            return
+        for other, var in self.conditions.items():
+            if other != cond and (cond in EXCLUSIVE_CONDITIONS or other in EXCLUSIVE_CONDITIONS):
+                var.set(0)
 
     def status(self, msg):
         self.root.after(0, lambda: self.status_var.set(msg))
@@ -204,6 +230,9 @@ class CollectorApp:
         if self.contraception.get() == CONTRACEPTION_OPTIONS[0] or self.age.get() == AGE_OPTIONS[0]:
             messagebox.showwarning("Missing info", "Please select your age range and contraception.")
             return
+        if self.overnight.get() == OVERNIGHT_OPTIONS[0]:
+            messagebox.showwarning("Missing info", "Please say whether you wear your Garmin while sleeping.")
+            return
 
         # Fixed window for everyone — set via DEFAULT_DAYS at the top of this file.
         days = DEFAULT_DAYS
@@ -213,6 +242,8 @@ class CollectorApp:
             "contraception": self.contraception.get(),
             "cycle_regularity": self.regularity.get() if self.regularity.get() != REGULARITY_OPTIONS[0] else "",
             "device_model": self.device.get().strip(),
+            "wears_overnight": self.overnight.get(),
+            "conditions": "; ".join(c for c, var in self.conditions.items() if var.get()),
         }
         self.button.config(state="disabled")
         threading.Thread(target=self.worker, args=(self.email.get().strip(),
