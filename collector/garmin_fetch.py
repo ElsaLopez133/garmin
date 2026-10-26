@@ -84,10 +84,15 @@ class GarminLoginError(Exception):
     """Login did not actually authenticate (e.g. wrong email/password)."""
 
 
-def _is_rate_limit_error(exc):
-    """True if exc (or any cause in its chain) looks like a Garmin 429."""
+def is_rate_limit_error(exc):
+    """True if exc (or any cause in its chain) is or looks like a Garmin 429.
+
+    Shared by login_with_retry, the server, and the personal scripts.
+    """
     current = exc
     while current is not None:
+        if isinstance(current, GarminConnectTooManyRequestsError):
+            return True
         message = str(current).lower()
         if "429" in message or "too many requests" in message or "rate limit" in message:
             return True
@@ -106,7 +111,7 @@ def login_with_retry(api, max_attempts=5, base_delay=15):
             api.login()
             return
         except Exception as exc:
-            if not (isinstance(exc, GarminConnectTooManyRequestsError) or _is_rate_limit_error(exc)):
+            if not is_rate_limit_error(exc):
                 raise
             if attempt == max_attempts:
                 raise

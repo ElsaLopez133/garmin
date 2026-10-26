@@ -108,7 +108,7 @@ def _start_download_job(api, days, meta):
             JOBS[job_id].update(status="Done", done=True, finished=time.monotonic())
         except Exception as e:  # noqa: BLE001
             print(f"Download job failed: {type(e).__name__}", file=sys.stderr)
-            msg = DOWNLOAD_RATE_LIMITED if _is_rate_limit(e) else DOWNLOAD_ERROR
+            msg = DOWNLOAD_RATE_LIMITED if garmin_fetch.is_rate_limit_error(e) else DOWNLOAD_ERROR
             JOBS[job_id].update(status="Error", done=True, error=msg, finished=time.monotonic())
 
     threading.Thread(target=run, daemon=True).start()
@@ -124,17 +124,6 @@ def _purge_expired():
     for job_id, job in list(JOBS.items()):
         if job["done"] and now - job["finished"] > JOB_TTL:
             JOBS.pop(job_id, None)
-
-
-def _is_rate_limit(exc):
-    """True if the exception chain looks like a Garmin 429 / rate-limit."""
-    cur = exc
-    while cur is not None:
-        m = str(cur).lower()
-        if "429" in m or "too many requests" in m or "rate limit" in m:
-            return True
-        cur = cur.__cause__ or cur.__context__
-    return False
 
 
 # --- Login throttle + circuit breaker -------------------------------------
@@ -179,7 +168,7 @@ def _throttled_login(email, password):
         try:
             result = api.login()
         except Exception as exc:
-            if _is_rate_limit(exc):
+            if garmin_fetch.is_rate_limit_error(exc):
                 _blocked_until = time.monotonic() + _RATE_LIMIT_COOLDOWN
             raise
         finally:
@@ -237,7 +226,7 @@ def start(request: Request, email: str = Form(...), password: str = Form(...),
         return templates.TemplateResponse(request, "index.html",
                                           _index_ctx({"error": msg}), status_code=429)
     except Exception as e:  # noqa: BLE001
-        if _is_rate_limit(e):
+        if garmin_fetch.is_rate_limit_error(e):
             msg = ("Garmin is temporarily limiting sign-ins because of too many recent "
                    "attempts. This is not a problem with your account — please wait about "
                    "30 minutes and try again.")
