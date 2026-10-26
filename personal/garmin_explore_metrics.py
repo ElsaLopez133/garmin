@@ -1,25 +1,30 @@
-from garminconnect import Garmin, GarminConnectTooManyRequestsError
-import json, os
-from datetime import date, timedelta
+"""
+Explore the structure of the Garmin API responses (keys only, no values).
+
+Prompts for your Garmin login, calls each endpoint once, and writes the nested
+key structure to data/garmin_keys_explore/garmin_keys_summary.{txt,json}.
+
+Run (from the repo root):
+    uv run python personal/garmin_explore_metrics.py
+"""
+
 import getpass
-import time
+import json
+import sys
+from datetime import date, timedelta
+from pathlib import Path
+
+from garminconnect import Garmin
 from tqdm import tqdm
 
-# ---------- CONFIG ----------
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-EMAIL = input("Email Garmin: ")
-PASSWORD = getpass.getpass("Password: ")
+from collector.garmin_fetch import login_with_retry, verify_login
 
-OUTPUT_DIR = "./data/garmin_keys_explore"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+OUTPUT_DIR = REPO_ROOT / "data" / "garmin_keys_explore"
 
-TEXT_FILE = os.path.join(OUTPUT_DIR, "garmin_keys_summary.txt")
-JSON_FILE = os.path.join(OUTPUT_DIR, "garmin_keys_summary.json")
-
-today = date.today()
-start_date = today - timedelta(days=30)
-
-# ---------- FUNCTIONS ----------
 
 def extract_structure(data):
     """Return a nested structure of keys without values."""
@@ -41,7 +46,7 @@ def format_structure_text(data, indent=0):
             lines.append("  " * indent + f"📂 {k}")
             lines.extend(format_structure_text(v, indent + 1))
     elif isinstance(data, list):
-        lines.append("  " * indent + f"[list]")
+        lines.append("  " * indent + "[list]")
         if data and isinstance(data[0], (dict, list)):
             lines.extend(format_structure_text(data[0], indent + 1))
     return lines
@@ -63,72 +68,47 @@ def explore_endpoint(api, func_name, args, prefix):
         return f"❌ Error fetching {prefix}: {e}\n", None
 
 
-def login_with_retry(api, max_attempts=5, base_delay=15):
-    """Retry Garmin login when Garmin Connect temporarily rate-limits auth."""
-    def is_rate_limit_error(exc):
-        current = exc
-        while current is not None:
-            message = str(current).lower()
-            if "429" in message or "too many requests" in message or "rate limit" in message:
-                return True
-            current = current.__cause__ or current.__context__
-        return False
+def main():
+    email = input("Email Garmin: ")
+    password = getpass.getpass("Password: ")
 
-    for attempt in range(1, max_attempts + 1):
-        try:
-            api.login()
-            return
-        except Exception as exc:
-            if not (
-                isinstance(exc, GarminConnectTooManyRequestsError)
-                or is_rate_limit_error(exc)
-            ):
-                raise
-            if attempt == max_attempts:
-                raise
-            wait_seconds = base_delay * (2 ** (attempt - 1))
-            print(
-                f"⚠️ Garmin rate-limited login ({exc}). "
-                f"Retrying in {wait_seconds} seconds "
-                f"({attempt}/{max_attempts})..."
-            )
-            time.sleep(wait_seconds)
+    print("🔐 Logging in to Garmin Connect...")
+    api = Garmin(email, password, prompt_mfa=lambda: input("MFA code: ").strip())
+    login_with_retry(api)
+    verify_login(api)
+
+    today = date.today()
+    start_date = today - timedelta(days=30)
+    metrics = {
+        "hrv": ("get_hrv_data", [today.isoformat()]),
+        "rhr": ("get_rhr_day", [today.isoformat()]),
+        "sleep": ("get_sleep_data", [today.isoformat()]),
+        "stress": ("get_stress_data", [today.isoformat()]),
+        "body_battery": ("get_body_battery", [today.isoformat()]),
+        "training_readiness": ("get_training_readiness", [today.isoformat()]),
+        "training_status": ("get_training_status", [today.isoformat()]),
+        "menstrual_calendar": ("get_menstrual_calendar_data", [start_date.isoformat(), today.isoformat()]),
+    }
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    text_file = OUTPUT_DIR / "garmin_keys_summary.txt"
+    json_file = OUTPUT_DIR / "garmin_keys_summary.json"
+
+    results_json = {}
+    with open(text_file, "w", encoding="utf-8") as f:
+        for name, (func_name, args) in tqdm(metrics.items(), desc="Exploring Garmin API"):
+            print(f"\n🔍 Exploring {name}...")
+            text, structure = explore_endpoint(api, func_name, args, name)
+            print(text)
+            f.write(text + "\n")
+            if structure:
+                results_json[name] = structure
+
+    with open(json_file, "w", encoding="utf-8") as f:
+        json.dump(results_json, f, indent=2, ensure_ascii=False)
+
+    print(f"\n✅ Saved key structures to:\n - {text_file}\n - {json_file}")
 
 
-# ---------- LOGIN ----------
-
-print("🔐 Logging in to Garmin Connect...")
-api = Garmin(EMAIL, PASSWORD)
-login_with_retry(api)
-
-# ---------- METRICS TO EXPLORE ----------
-
-metrics = {
-    "hrv": ("get_hrv_data", [today.isoformat()]),
-    "rhr": ("get_rhr_day", [today.isoformat()]),
-    "sleep": ("get_sleep_data", [today.isoformat()]),
-    "stress": ("get_stress_data", [today.isoformat()]),
-    "body_battery": ("get_body_battery", [today.isoformat()]),
-    "training_readiness": ("get_training_readiness", [today.isoformat()]),
-    "training_status": ("get_training_status", [today.isoformat()]),
-    "menstrual_calendar": ("get_menstrual_calendar_data", [start_date.isoformat(), today.isoformat()]),
-}
-
-# ---------- RUN EXPLORATION ----------
-
-results_json = {}
-
-with open(TEXT_FILE, "w", encoding="utf-8") as f:
-    for name, (func_name, args) in tqdm(metrics.items(), desc="Exploring Garmin API"):
-        print(f"\n🔍 Exploring {name}...")
-        text, structure = explore_endpoint(api, func_name, args, name)
-        print(text)
-        f.write(text + "\n")
-        if structure:
-            results_json[name] = structure
-
-# Save JSON version
-with open(JSON_FILE, "w", encoding="utf-8") as f:
-    json.dump(results_json, f, indent=2, ensure_ascii=False)
-
-print(f"\n✅ Saved key structures to:\n - {TEXT_FILE}\n - {JSON_FILE}")
+if __name__ == "__main__":
+    main()
