@@ -68,10 +68,20 @@ def _save_dataframe(df, participant_id):
 app = FastAPI()
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
-# In-memory only. Nothing here is persisted.
-PENDING_MFA = {}   # token -> {api, client_state, days, meta, attempts}
-JOBS = {}          # job_id -> {status, done, error, participant_id}
+# In-memory only. Nothing here is persisted. Expired entries are dropped by
+# _purge_expired() on each request, so abandoned Garmin sessions don't linger.
+PENDING_MFA = {}   # token -> {api, client_state, days, meta, attempts, created}
+JOBS = {}          # job_id -> {status, done, error, participant_id, finished}
 MAX_MFA_ATTEMPTS = 3
+MFA_TTL = 10 * 60   # seconds an unfinished 2FA login is kept
+JOB_TTL = 60 * 60   # seconds a finished job's status page stays available
+
+# Shown to participants instead of raw exception text (which can contain Garmin
+# account details); only the exception type goes to the server log.
+DOWNLOAD_ERROR = ("Something went wrong while downloading your data. Please try again "
+                  "later, or contact the research team if it keeps happening.")
+DOWNLOAD_RATE_LIMITED = ("Garmin is temporarily limiting requests from this server. This is "
+                         "not a problem with your account — please try again in about 30 minutes.")
 
 AGE_OPTIONS = ["18–24", "25–34", "35–44", "45+"]
 CONTRACEPTION_OPTIONS = ["None / non-hormonal", "Hormonal pill", "Hormonal IUD",
@@ -95,12 +105,25 @@ def _start_download_job(api, days, meta):
             meta_cols = list(meta.keys())
             df = df[meta_cols + [c for c in df.columns if c not in meta_cols]]
             _save_dataframe(df, meta["participant_id"])
-            JOBS[job_id].update(status="Done", done=True)
+            JOBS[job_id].update(status="Done", done=True, finished=time.monotonic())
         except Exception as e:  # noqa: BLE001
-            JOBS[job_id].update(status="Error", done=True, error=str(e))
+            print(f"Download job failed: {type(e).__name__}", file=sys.stderr)
+            msg = DOWNLOAD_RATE_LIMITED if _is_rate_limit(e) else DOWNLOAD_ERROR
+            JOBS[job_id].update(status="Error", done=True, error=msg, finished=time.monotonic())
 
     threading.Thread(target=run, daemon=True).start()
     return job_id
+
+
+def _purge_expired():
+    """Drop abandoned 2FA logins and old finished jobs from memory."""
+    now = time.monotonic()
+    for token, entry in list(PENDING_MFA.items()):
+        if now - entry["created"] > MFA_TTL:
+            PENDING_MFA.pop(token, None)
+    for job_id, job in list(JOBS.items()):
+        if job["done"] and now - job["finished"] > JOB_TTL:
+            JOBS.pop(job_id, None)
 
 
 def _is_rate_limit(exc):
@@ -190,6 +213,7 @@ def start(request: Request, email: str = Form(...), password: str = Form(...),
           device_model: str = Form(""), wears_overnight: str = Form(""),
           conditions: list[str] = Form(default=[]),
           consent: str = Form(None)):
+    _purge_expired()
     # Fixed server-side; participants cannot change how much history is pulled.
     days = DEFAULT_DAYS
     if not consent:
@@ -228,7 +252,8 @@ def start(request: Request, email: str = Form(...), password: str = Form(...),
     # MFA needed?
     if isinstance(result, tuple) and result and result[0] == "needs_mfa":
         token = secrets.token_urlsafe(16)
-        PENDING_MFA[token] = {"api": api, "client_state": result[1], "days": days, "meta": meta}
+        PENDING_MFA[token] = {"api": api, "client_state": result[1], "days": days, "meta": meta,
+                              "created": time.monotonic()}
         return templates.TemplateResponse(request, "mfa.html", {"token": token})
 
     # Confirm the session actually authenticated before spending minutes downloading.
@@ -246,6 +271,7 @@ def start(request: Request, email: str = Form(...), password: str = Form(...),
 
 @app.post("/mfa", response_class=HTMLResponse)
 def mfa(request: Request, token: str = Form(...), code: str = Form(...)):
+    _purge_expired()
     entry = PENDING_MFA.get(token)
     if not entry:
         return templates.TemplateResponse(
@@ -255,6 +281,7 @@ def mfa(request: Request, token: str = Form(...), code: str = Form(...)):
         entry["api"].resume_login(entry["client_state"], code.strip())
         garmin_fetch.verify_login(entry["api"])
     except Exception as e:  # noqa: BLE001
+        print(f"MFA attempt failed: {type(e).__name__}", file=sys.stderr)
         # Keep the entry so a mistyped code can be retried, up to a few attempts.
         entry["attempts"] = entry.get("attempts", 0) + 1
         if entry["attempts"] >= MAX_MFA_ATTEMPTS:
@@ -264,7 +291,8 @@ def mfa(request: Request, token: str = Form(...), code: str = Form(...)):
                 _index_ctx({"error": "Too many incorrect codes. Please start again."}), status_code=400)
         return templates.TemplateResponse(
             request, "mfa.html",
-            {"token": token, "error": f"That code didn't work: {e}"}, status_code=400)
+            {"token": token, "error": "That code didn't work. Please check it and try again."},
+            status_code=400)
 
     PENDING_MFA.pop(token, None)
     job_id = _start_download_job(entry["api"], entry["days"], entry["meta"])
@@ -273,6 +301,7 @@ def mfa(request: Request, token: str = Form(...), code: str = Form(...)):
 
 @app.get("/status/{job_id}", response_class=HTMLResponse)
 def status(request: Request, job_id: str):
+    _purge_expired()
     job = JOBS.get(job_id)
     if not job:
         return RedirectResponse(url="/", status_code=303)
