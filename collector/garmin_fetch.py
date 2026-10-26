@@ -142,9 +142,11 @@ def verify_login(api):
     """Confirm the session loaded the user's profile, else raise GarminLoginError.
 
     login() / resume_login() fetch the Garmin profile, whose ``display_name`` goes
-    into the URL of every per-user endpoint (resting HR, sleep, ...). resume_login()
-    (the MFA path) only logs a failed profile fetch, so check it here and fail fast
-    instead of grinding through a download of errors. ``full_name`` is not used: it
+    into the URL of every per-user endpoint (resting HR, sleep, ...) — except login()
+    with ``return_on_mfa=True`` (the server), which returns before loading it, so the
+    caller must load it. resume_login() (the MFA path) only logs a failed profile
+    fetch, so check it here and fail fast instead of grinding through a download of
+    errors. ``full_name`` is not used: it
     is legitimately empty for accounts without a name set.
     """
     if not getattr(api, "display_name", None):

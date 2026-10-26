@@ -226,6 +226,7 @@ def start(request: Request, email: str = Form(...), password: str = Form(...),
         return templates.TemplateResponse(request, "index.html",
                                           _index_ctx({"error": msg}), status_code=429)
     except Exception as e:  # noqa: BLE001
+        print(f"Login failed: {type(e).__name__}", file=sys.stderr)
         if garmin_fetch.is_rate_limit_error(e):
             msg = ("Garmin is temporarily limiting sign-ins because of too many recent "
                    "attempts. This is not a problem with your account — please wait about "
@@ -245,10 +246,14 @@ def start(request: Request, email: str = Form(...), password: str = Form(...),
                               "created": time.monotonic()}
         return templates.TemplateResponse(request, "mfa.html", {"token": token})
 
-    # Confirm the session actually authenticated before spending minutes downloading.
+    # With return_on_mfa=True, garminconnect 0.3.6's login() returns before loading the
+    # profile even when no MFA was needed (resume_login loads it on the MFA path), so load
+    # it here: every per-user endpoint needs display_name. Then confirm the session.
     try:
+        api._load_profile_and_settings()
         garmin_fetch.verify_login(api)
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
+        print(f"Profile load / verify failed: {type(e).__name__}", file=sys.stderr)
         return templates.TemplateResponse(
             request, "index.html",
             _index_ctx({"error": "Could not log in to Garmin. Please double-check your "
