@@ -69,9 +69,10 @@ function doPost(e) {
  * doGet — the participant page, or (with a token) list / download the uploads.
  *   (no parameters)           -> participant upload page
  *   ?page=privacy             -> privacy policy
- *   ?token=...                -> JSON list of filenames
- *   ?token=...&download=1     -> JSON [{name, data(base64)}, ...] for every file
- * The token variants are used by collector/fetch_uploads.py.
+ *   ?token=...                -> JSON [{id, name, size}, ...] for every upload
+ *   ?token=...&id=...         -> JSON {name, data(base64)} for that one upload
+ * The token variants are used by collector/fetch_uploads.py. Files are served one
+ * per request so the response size doesn't grow with the number of uploads.
  */
 function doGet(e) {
   var p = (e && e.parameter) || {};
@@ -86,19 +87,21 @@ function doGet(e) {
     if (p.token !== UPLOAD_TOKEN) {
       return _text("forbidden");
     }
+    if (p.id) {
+      var file = DriveApp.getFileById(p.id);
+      if (!_inUploadFolder(file)) {
+        return _text("forbidden");
+      }
+      return _json({ name: file.getName(),
+                     data: Utilities.base64Encode(file.getBlob().getBytes()) });
+    }
     var files = DriveApp.getFolderById(FOLDER_ID).getFiles();
     var out = [];
     while (files.hasNext()) {
       var f = files.next();
-      if (p.download) {
-        out.push({ name: f.getName(),
-                   data: Utilities.base64Encode(f.getBlob().getBytes()) });
-      } else {
-        out.push(f.getName());
-      }
+      out.push({ id: f.getId(), name: f.getName(), size: f.getSize() });
     }
-    return ContentService.createTextOutput(JSON.stringify(out))
-                         .setMimeType(ContentService.MimeType.JSON);
+    return _json(out);
   } catch (err) {
     return _text("error: " + err);
   }
@@ -134,6 +137,22 @@ function submitExport(meta, zipBase64) {
   DriveApp.getFolderById(FOLDER_ID)
           .createFile(Utilities.zip(files, "garmin_export_" + participantId + ".zip"));
   return participantId;
+}
+
+// Only files in the uploads folder may be downloaded, not any Drive file by ID.
+function _inUploadFolder(file) {
+  var parents = file.getParents();
+  while (parents.hasNext()) {
+    if (parents.next().getId() === FOLDER_ID) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function _json(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+                       .setMimeType(ContentService.MimeType.JSON);
 }
 
 function _text(s) {

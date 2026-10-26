@@ -18,8 +18,10 @@ Run:
     python collector/fetch_uploads.py              # -> data/participants/
     python collector/fetch_uploads.py somedir/     # custom output folder
 
-Re-running just re-downloads everything and overwrites (cheap for small CSVs), so
-it doubles as a "sync": run it whenever new participants have submitted.
+It works as a "sync": only uploads not already present locally are downloaded (one
+request per file), so run it whenever new participants have submitted. Delete a
+local file to fetch it again. A zip that fails to convert is removed, so the next
+run retries it.
 """
 
 import base64
@@ -53,6 +55,18 @@ OUT_DIR = sys.argv[1] if len(sys.argv) > 1 else "data/participants"
 EXPORTS_DIR = "data/participant_exports"
 
 
+def _get(params, timeout):
+    """GET the Apps Script endpoint with the token and return the parsed JSON."""
+    resp = requests.get(ENDPOINT_URL, params={"token": UPLOAD_TOKEN, **params}, timeout=timeout)
+    resp.raise_for_status()
+    if resp.text.strip() == "forbidden":
+        sys.exit("Endpoint returned 'forbidden' — token mismatch.")
+    try:
+        return resp.json()
+    except ValueError:
+        sys.exit(f"Unexpected response: {resp.text[:200]}")
+
+
 def main():
     if not ENDPOINT_URL or not UPLOAD_TOKEN:
         sys.exit("Set GARMIN_ENDPOINT_URL and GARMIN_UPLOAD_TOKEN environment variables first.")
@@ -60,41 +74,46 @@ def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     print(f"Fetching uploads from Drive into {OUT_DIR}/ …")
 
-    resp = requests.get(ENDPOINT_URL, params={"token": UPLOAD_TOKEN, "download": "1"}, timeout=300)
-    resp.raise_for_status()
-    if resp.text.strip() == "forbidden":
-        sys.exit("Endpoint returned 'forbidden' — token mismatch.")
-
-    try:
-        files = resp.json()
-    except ValueError:
-        sys.exit(f"Unexpected response: {resp.text[:200]}")
-
+    files = _get({}, timeout=60)
     if not files:
         print("No files in the Drive folder yet.")
         return
+    if isinstance(files[0], str):  # the old doGet listed bare names
+        sys.exit("The Drive endpoint is out of date: redeploy collector/upload_endpoint.gs "
+                 "(Manage deployments -> Edit -> Version: New version) and run again.")
 
+    new = present = failed = 0
     for f in files:
-        if not f["name"].endswith(".zip"):
-            path = os.path.join(OUT_DIR, f["name"])
-            with open(path, "wb") as fh:
-                fh.write(base64.b64decode(f["data"]))
-            print(f"  ✓ {f['name']}")
+        name = os.path.basename(f["name"])  # never write outside the target folder
+        is_zip = name.endswith(".zip")
+        path = os.path.join(EXPORTS_DIR if is_zip else OUT_DIR, name)
+        if os.path.exists(path):
+            present += 1
             continue
-        os.makedirs(EXPORTS_DIR, exist_ok=True)
-        zip_path = os.path.join(EXPORTS_DIR, f["name"])
-        with open(zip_path, "wb") as fh:
-            fh.write(base64.b64decode(f["data"]))
+
+        data = base64.b64decode(_get({"id": f["id"]}, timeout=300)["data"])
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(data)
+        if not is_zip:
+            print(f"  ✓ {name}")
+            new += 1
+            continue
+
         try:
-            df = garmin_export.participant_dataframe(zip_path)
+            df = garmin_export.participant_dataframe(path)
         except Exception as e:  # noqa: BLE001 — one bad upload shouldn't stop the sync
-            print(f"  ✗ {f['name']}: {e}")
+            os.remove(path)  # so the next sync retries it
+            print(f"  ✗ {name}: {e}")
+            failed += 1
             continue
         csv_name = f"garmin_data_{df['participant_id'].iloc[0]}.csv"
         df.to_csv(os.path.join(OUT_DIR, csv_name), index=False)
-        print(f"  ✓ {f['name']} -> {csv_name} ({len(df)} days)")
+        print(f"  ✓ {name} -> {csv_name} ({len(df)} days)")
+        new += 1
 
-    print(f"\n✅ Downloaded {len(files)} file(s) to {OUT_DIR}/")
+    print(f"\n✅ {new} new file(s), {present} already present"
+          + (f", {failed} failed" if failed else "") + f" — CSVs in {OUT_DIR}/")
 
 
 if __name__ == "__main__":
