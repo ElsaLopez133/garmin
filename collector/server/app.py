@@ -69,8 +69,9 @@ app = FastAPI()
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 # In-memory only. Nothing here is persisted.
-PENDING_MFA = {}   # token -> {api, client_state, days, meta}
+PENDING_MFA = {}   # token -> {api, client_state, days, meta, attempts}
 JOBS = {}          # job_id -> {status, done, error, participant_id}
+MAX_MFA_ATTEMPTS = 3
 
 AGE_OPTIONS = ["18–24", "25–34", "35–44", "45+"]
 CONTRACEPTION_OPTIONS = ["None / non-hormonal", "Hormonal pill", "Hormonal IUD",
@@ -245,7 +246,7 @@ def start(request: Request, email: str = Form(...), password: str = Form(...),
 
 @app.post("/mfa", response_class=HTMLResponse)
 def mfa(request: Request, token: str = Form(...), code: str = Form(...)):
-    entry = PENDING_MFA.pop(token, None)
+    entry = PENDING_MFA.get(token)
     if not entry:
         return templates.TemplateResponse(
             request, "index.html",
@@ -254,10 +255,18 @@ def mfa(request: Request, token: str = Form(...), code: str = Form(...)):
         entry["api"].resume_login(entry["client_state"], code.strip())
         garmin_fetch.verify_login(entry["api"])
     except Exception as e:  # noqa: BLE001
+        # Keep the entry so a mistyped code can be retried, up to a few attempts.
+        entry["attempts"] = entry.get("attempts", 0) + 1
+        if entry["attempts"] >= MAX_MFA_ATTEMPTS:
+            PENDING_MFA.pop(token, None)
+            return templates.TemplateResponse(
+                request, "index.html",
+                _index_ctx({"error": "Too many incorrect codes. Please start again."}), status_code=400)
         return templates.TemplateResponse(
             request, "mfa.html",
             {"token": token, "error": f"That code didn't work: {e}"}, status_code=400)
 
+    PENDING_MFA.pop(token, None)
     job_id = _start_download_job(entry["api"], entry["days"], entry["meta"])
     return RedirectResponse(url=f"/status/{job_id}", status_code=303)
 
