@@ -35,7 +35,7 @@ data/  figs/   outputs (gitignored)
 
 ## Installation
 
-Python 3.10+ and [uv](https://docs.astral.sh/uv/).
+Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync --all-extras          # full env (adds the server + analysis extras)

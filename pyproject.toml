@@ -2,7 +2,7 @@
 name = "garmin-cycle-analytics"
 version = "0.1.0"
 description = "Download Garmin health data and analyze menstrual cycle phase and ovulation signals."
-requires-python = ">=3.10"
+requires-python = ">=3.12"   # garminconnect 0.3.6 needs 3.12+
 # Shared core — the download engine (collector/garmin_fetch.py), the collector
 # front-ends, and the personal scripts all need these.
 dependencies = [
