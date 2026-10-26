@@ -56,7 +56,7 @@ def find_cycles(df):
     (garmin_predicted_fertile). It is useful for visual alignment, but it is still
     Garmin's calendar algorithm and must not be treated as true LH-peak ovulation.
     """
-    is_period = df["is_period"] if "is_period" in df.columns else df["cycle_phase"] == "Period"
+    is_period = df["is_period"]
     starts = list(df.loc[is_period & ~is_period.shift(1, fill_value=False), "date"])
     cycles = []
     for i, start in enumerate(starts):
@@ -110,7 +110,7 @@ def quantify(aligned, metric):
 
 def main():
     df, out_path, label = load_csv()
-    for col in ("cycle_phase", "garmin_predicted_fertile"):
+    for col in ("is_period", "garmin_predicted_fertile"):
         if col not in df.columns:
             sys.exit(f"❌ No '{col}' column.")
 
