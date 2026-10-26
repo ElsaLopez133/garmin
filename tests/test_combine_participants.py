@@ -16,8 +16,7 @@ def _participant(pid, days=60, period_starts=(0, 28, 56),
     return pd.DataFrame({
         "participant_id": pid,
         "date": dates,
-        "is_period": is_period,
-        "cycle_phase": "Not logged",
+        "is_period": is_period,   # raw truth only, like a collected CSV (no cycle_phase)
         "resting_hr": rhr,
         "contraception": contraception,
     })
@@ -27,7 +26,8 @@ def test_cycle_stats_counts_starts_and_length():
     n_cyc, avg_len, pct_logged = cycle_stats(_participant("p"))
     assert n_cyc == 3          # three period onsets
     assert avg_len == 28.0     # two 28-day gaps
-    assert pct_logged == round(12 / 60 * 100, 1)
+    # derived 5-day anchors: early follicular 0-4, 28-32, 56-59; late luteal 23-27, 51-55
+    assert pct_logged == round(24 / 60 * 100, 1)
 
 
 def test_build_combined_stacks_and_flags_usability():

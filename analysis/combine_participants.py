@@ -15,8 +15,15 @@ Run:
 import glob
 import os
 import sys
+from pathlib import Path
 
 import pandas as pd
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from preprocessing.cycle_phases import PHASE_NOT_LOGGED, derive_cycle_phases
 
 IN_DIR = sys.argv[1] if len(sys.argv) > 1 else "data/participants"
 OUT_DIR = "data/combined"
@@ -27,11 +34,16 @@ HORMONAL = {"Hormonal pill", "Hormonal IUD", "Implant / injection / ring"}
 
 
 def cycle_stats(df):
-    """Return (n_cycles, avg_cycle_length, pct_phase_logged)."""
-    if "cycle_phase" not in df.columns:
+    """Return (n_cycles, avg_cycle_length, pct_phase_logged).
+
+    Collected CSVs carry only the raw ``is_period`` truth, so the phase anchors are
+    derived here (as in garmin_cycle_check.py) rather than read from the file.
+    """
+    if "is_period" not in df.columns:
         return 0, None, 0.0
-    is_period = df["is_period"] if "is_period" in df.columns else df["cycle_phase"] == "Period"
-    pct_logged = ((df["cycle_phase"] != "Not logged") | is_period).mean() * 100
+    df = derive_cycle_phases(df)
+    is_period = df["is_period"]
+    pct_logged = (df["cycle_phase"] != PHASE_NOT_LOGGED).mean() * 100
     starts = list(df.loc[is_period & ~is_period.shift(1, fill_value=False), "date"])
     if len(starts) >= 2:
         lengths = [(starts[i + 1] - starts[i]).days for i in range(len(starts) - 1)]
