@@ -21,9 +21,11 @@ while True:
             raise ValueError
         break
     except ValueError:
-        print("⚠️ You need to first download the data!")
-    
-FILE_NAME = f"./data/garmin_data_{DAYS_BACK}days/garmin_data_{DAYS_BACK}days.csv" 
+        print("⚠️ Please enter a positive number (e.g. 90).")
+
+FILE_NAME = f"./data/garmin_data_{DAYS_BACK}days/garmin_data_{DAYS_BACK}days.csv"
+if not os.path.exists(FILE_NAME):
+    sys.exit(f"❌ No data found at {FILE_NAME} — download it first.")
 df = pd.read_csv(FILE_NAME)
 
 # ---- OUTPUT DIRECTORY ----
@@ -62,6 +64,7 @@ plt.legend()
 plt.grid(alpha=0.3)
 plt.tight_layout()
 plt.savefig(f"{OUTPUT_DIR}/hrv_plot.jpg")
+plt.close()
 #plt.show()
 
 
@@ -76,6 +79,7 @@ plt.legend()
 plt.grid(alpha=0.3)
 plt.tight_layout()
 plt.savefig(f"{OUTPUT_DIR}/rhr_plot.jpg")
+plt.close()
 #plt.show()
 
 # ---- HRV and RHR ----
@@ -124,16 +128,7 @@ for l, lab in zip(lines, labels):
 ax1.legend(unique_lines, unique_labels, loc="upper left")
 plt.tight_layout()
 plt.savefig(f"{OUTPUT_DIR}/hrv_rhr_plot.jpg")
-
-
-
-plt.plot(df["date"], df["resting_hr"], color="red", marker="o", markersize=3, linewidth=2, alpha=0.9,  label="RHR")
-plt.ylabel("BPM")
-plt.legend()
-plt.grid(alpha=0.3)
-plt.tight_layout()
-plt.savefig(f"{OUTPUT_DIR}/rhr_plot.jpg")
-#plt.show()
+plt.close()
 
 # ---- Sleep ----
 print("\n😴 Plotting Sleep data...")
@@ -170,6 +165,7 @@ plt.legend([light, deep, rem, awake], colors.keys(), title="Sleep Stage", loc="u
 plt.xticks(rotation=45)
 plt.tight_layout()
 plt.savefig(f"{OUTPUT_DIR}/sleep_plot.jpg")
+plt.close()
 #plt.show()
 
 
@@ -221,6 +217,7 @@ plt.ylabel("HRV (ms) / RHR (BPM)")
 plt.grid(alpha=0.3)
 plt.tight_layout()
 plt.savefig(f"{OUTPUT_DIR}/combined_plot.png")
+plt.close()
 #plt.show()
 
  #---- Training load ----
@@ -281,6 +278,7 @@ plt.legend(handles=phase_patches + [chronic_line, acute_line])
 plt.grid(alpha=0.3)
 plt.tight_layout()
 plt.savefig(f"{OUTPUT_DIR}/acute_chronic_load_plot.jpg")
+plt.close()
 
 
 
